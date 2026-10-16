@@ -20,7 +20,7 @@ end
 
 local View = {
 	id = "validate",
-	title = "Validação",
+	title = "Conferir problemas",
 	watches = {},
 }
 

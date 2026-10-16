@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+**SDK**
+- `RoMetrics.trackReceipt(receiptInfo)`: registra a venda de um developer product quando o seu jogo já tem o próprio `ProcessReceipt` (chame logo antes de devolver `PurchaseGranted`). Alternativa ao `wrapProcessReceipt`.
+- O `ProcessReceipt` tem um dono só (a última atribuição vence). Se um produto for comprado e nenhum callback embrulhado nem `trackReceipt` registrar em 30 s, o SDK avisa uma vez no Output.
+- Um handler que devolve `nil` ou um valor que não é decisão agora gera aviso e devolve `NotProcessedYet`.
+- Também no Wally: `victorcarmo2003/rometrics@0.3.0`.
+
+**Plugin do Studio**
+- Visual novo e navegação por tarefa: **Início**, **Medir** ("o que você quer medir?" com assistentes que geram a linha de código), **Vendas** (acha quem atribui o `ProcessReceipt` e embrulha com 1 clique, com prévia e Ctrl+Z), **Eventos** e **Ajustes**.
+- **Ajustes › Testar com o site**: cole o código gerado no painel (Configurações › Jogos › Testar conexão). O painel confere o jogo aberto, o SDK, o script de setup e o endereço, e espera o primeiro evento.
+- **Ajustes › Enviar eventos de teste**: manda os eventos custom do registro (marcados como teste) sem precisar dar Play, para ver como chegam no painel.
+- Ferramentas avançadas (marcar objeto sem código, editor de funis, conferir problemas) continuam disponíveis.
+
 ## 0.2.0
 
 Plugin do Studio redesenhado. O SDK não mudou (continua igual ao 0.1.0).

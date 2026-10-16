@@ -13,6 +13,7 @@ return function()
 	local sessions: any
 	local player: any
 	local marketplace: any
+	local delayed: { () -> () }
 
 	local function receipt(overrides: { [string]: any }?): { [string]: any }
 		local r: { [string]: any } = {
@@ -41,7 +42,15 @@ return function()
 			[1001] = { Name = "100 Coins", PriceInRobux = 50 },
 			[2002] = { Name = "VIP", PriceInRobux = 399 },
 		})
-		Purchases._setDeps({ marketplace = marketplace, players = Fakes.players({ player }), retryDelay = 0 })
+		delayed = {}
+		Purchases._setDeps({
+			marketplace = marketplace,
+			players = Fakes.players({ player }),
+			retryDelay = 0,
+			delay = function(_seconds: number, fn: () -> ())
+				table.insert(delayed, fn)
+			end,
+		})
 		if started then
 			Purchases.start(Fakes.config(), queue, sessions)
 		end
@@ -138,6 +147,104 @@ return function()
 		end)
 	end)
 
+	describe("trackReceipt", function()
+		it("records a receipt granted by a ProcessReceipt the game owns", function()
+			setup(true)
+			Purchases.trackReceipt(receipt())
+			Purchases.trackReceipt(receipt())
+			expect(#queue.events).to.equal(1)
+			expect(queue.events[1].data.kind).to.equal("devproduct")
+			expect(queue.events[1].data.receiptId).to.equal("abc-123")
+		end)
+
+		it("ignores non-table input", function()
+			setup(true)
+			Purchases.trackReceipt(nil :: any)
+			expect(#queue.events).to.equal(0)
+		end)
+	end)
+
+	describe("non-decision returns", function()
+		it("turns a nil return into NotProcessedYet without tracking", function()
+			setup(true)
+			local wrapped = Purchases.wrapProcessReceipt(function(_info)
+				return nil :: any
+			end)
+			expect(wrapped(receipt())).to.equal(NotYet)
+			expect(#queue.events).to.equal(0)
+		end)
+	end)
+
+	describe("override diagnostic", function()
+		local function warnings(fn: () -> ()): { string }
+			local Log = require(RoMetrics.Util.Log) :: any
+			local original = Log.warn
+			local seen = {}
+			Log.warn = function(message: string)
+				table.insert(seen, message)
+			end
+			local ok, err = pcall(fn)
+			Log.warn = original
+			if not ok then
+				error(err)
+			end
+			return seen
+		end
+
+		it("warns once when a bought product never reached a wrapped callback", function()
+			setup(true)
+			local seen = warnings(function()
+				marketplace.PromptProductPurchaseFinished:Fire(42, 1001, true)
+				marketplace.PromptProductPurchaseFinished:Fire(42, 1001, true)
+				for _, fn in delayed do
+					fn()
+				end
+			end)
+			expect(#seen).to.equal(1)
+			expect(string.find(seen[1], "ProcessReceipt", 1, true)).to.be.ok()
+		end)
+
+		it("stays quiet when the wrapper saw the receipt", function()
+			setup(true)
+			local wrapped = Purchases.wrapProcessReceipt(function(_info)
+				return Granted
+			end)
+			local seen = warnings(function()
+				marketplace.PromptProductPurchaseFinished:Fire(42, 1001, true)
+				wrapped(receipt())
+				for _, fn in delayed do
+					fn()
+				end
+			end)
+			expect(#seen).to.equal(0)
+		end)
+
+		it("stays quiet when trackReceipt saw the receipt", function()
+			setup(true)
+			local seen = warnings(function()
+				Purchases.trackReceipt(receipt())
+				marketplace.PromptProductPurchaseFinished:Fire(42, 1001, true)
+				for _, fn in delayed do
+					fn()
+				end
+			end)
+			expect(#seen).to.equal(0)
+		end)
+
+		it("ignores cancelled product prompts", function()
+			setup(true)
+			marketplace.PromptProductPurchaseFinished:Fire(42, 1001, false)
+			expect(#delayed).to.equal(0)
+		end)
+
+		it("starts when the marketplace has no PromptProductPurchaseFinished", function()
+			setup(false)
+			marketplace.PromptProductPurchaseFinished = nil
+			Purchases.start(Fakes.config(), queue, sessions)
+			expect(marketplace.PromptGamePassPurchaseFinished:count()).to.equal(1)
+		end)
+	end)
+
 	describe("game passes", function()
 		it("emits a gamepass purchase with catalog name/price when purchased", function()
 			setup(true)
@@ -172,6 +279,7 @@ return function()
 			setup(true)
 			Purchases.start(Fakes.config(), queue, sessions)
 			expect(marketplace.PromptGamePassPurchaseFinished:count()).to.equal(1)
+			expect(marketplace.PromptProductPurchaseFinished:count()).to.equal(1)
 		end)
 	end)
 end

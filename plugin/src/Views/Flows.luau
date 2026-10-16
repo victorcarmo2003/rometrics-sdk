@@ -33,7 +33,7 @@ end
 
 local View = {
 	id = "flows",
-	title = "Fluxos",
+	title = "Editor de funis",
 	watches = {},
 }
 
@@ -317,8 +317,8 @@ function View.render(app: any, container: Frame)
 			}),
 			UI.button("Gerar código", {
 				onClick = function()
-					app.state.snippets = { id = "funnel", event = current.name }
-					app:setTab("snippets")
+					app.state.measure = { mode = "funnel", event = current.name }
+					app:setTab("measure")
 				end,
 			}),
 		}).Parent =

@@ -25,7 +25,7 @@ local Log = require(script.Util.Log)
 export type Options = Types.Options
 
 local RoMetrics = {}
-RoMetrics.VERSION = "0.1.0"
+RoMetrics.VERSION = "0.3.0"
 
 type State = {
 	config: Types.Config,
@@ -89,8 +89,16 @@ end
 
 -- Wraps MarketplaceService.ProcessReceipt. Works even if init was not called
 -- (purchases are then simply not tracked). The game's handler result is always preserved.
+-- ProcessReceipt has a single owner (the last assignment wins): wrap the callback the game
+-- already assigns instead of adding a second one.
 function RoMetrics.wrapProcessReceipt(handler: (receiptInfo: { [string]: any }) -> Enum.ProductPurchaseDecision)
 	return Purchases.wrapProcessReceipt(handler)
+end
+
+-- Records a granted developer product receipt from a ProcessReceipt the game owns
+-- (call it right before returning PurchaseGranted). Alternative to wrapProcessReceipt.
+function RoMetrics.trackReceipt(receiptInfo: { [string]: any })
+	safe("trackReceipt", Purchases.trackReceipt)(receiptInfo)
 end
 
 -- AnalyticsService-compatible API (same argument order as the native service).

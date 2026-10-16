@@ -1,10 +1,10 @@
 # RoMetrics SDK for Roblox — reference for AI assistants
 
-> You are helping a Roblox developer integrate the RoMetrics SDK (real-time analytics: players, sales, custom events). This file is the complete, authoritative API. Do not invent functions, options or events that are not listed here. Answer the user in their own language (often Portuguese). Version: 0.1.0. Human docs: https://victorcarmo2003.github.io/rometrics-sdk/ · Source: https://github.com/victorcarmo2003/rometrics-sdk
+> You are helping a Roblox developer integrate the RoMetrics SDK (real-time analytics: players, sales, custom events). This file is the complete, authoritative API. Do not invent functions, options or events that are not listed here. Answer the user in their own language (often Portuguese). Version: 0.3.0. Human docs: https://victorcarmo2003.github.io/rometrics-sdk/ · Source: https://github.com/victorcarmo2003/rometrics-sdk
 
 ## 1. Mental model
 
-- One ModuleScript named `RoMetrics` (usually in `ReplicatedStorage`; with Wally: `RoMetrics = "victorcarmo2003/rometrics@0.1.0"`, required as `ReplicatedStorage.Packages.RoMetrics`). **Server-only**: require and call it from Scripts in `ServerScriptService`, never from LocalScripts.
+- One ModuleScript named `RoMetrics` (usually in `ReplicatedStorage`; with Wally: `RoMetrics = "victorcarmo2003/rometrics@0.3.0"`, required as `ReplicatedStorage.Packages.RoMetrics`). **Server-only**: require and call it from Scripts in `ServerScriptService`, never from LocalScripts.
 - Call `RoMetrics.init({...})` once at server start. After that, a lot is tracked automatically (servers/CCU, player join/leave, country, Premium, join source, Game Pass purchases, player platform, tagged instances).
 - The event API mirrors Roblox `AnalyticsService` exactly (same method names and argument order), called with `:`.
 - **No call ever throws** into game code. Invalid input is dropped with a `warn` in Output. Do not wrap SDK calls in `pcall`; it is unnecessary.
@@ -62,6 +62,7 @@ Never put a production key in source code. Never suggest reading the key on the 
 |---|---|---|
 | `RoMetrics.init` | function (`.`) | `init(options: Options): ()` |
 | `RoMetrics.wrapProcessReceipt` | function (`.`) | `wrapProcessReceipt(handler: (receiptInfo) -> Enum.ProductPurchaseDecision): (receiptInfo) -> Enum.ProductPurchaseDecision` |
+| `RoMetrics.trackReceipt` | function (`.`) | `trackReceipt(receiptInfo): ()` — record a granted developer product from a `ProcessReceipt` the game owns; call right before returning `PurchaseGranted` (use this OR `wrapProcessReceipt`, never both) |
 | `RoMetrics:LogCustomEvent` | method (`:`) | `(player: Player, eventName: string, value: number?, customFields: {[string]: any}?)` |
 | `RoMetrics:LogEconomyEvent` | method | `(player: Player, flowType: Enum.AnalyticsEconomyFlowType, currencyType: string, amount: number, endingBalance: number, transactionType: string, itemSku: string?, customFields: {[string]: any}?)` |
 | `RoMetrics:LogFunnelStepEvent` | method | `(player: Player, funnelName: string, funnelSessionId: string?, step: number, stepName: string?, customFields: {[string]: any}?)` |
@@ -69,7 +70,7 @@ Never put a production key in source code. Never suggest reading the key on the 
 | `RoMetrics:LogProgressionEvent` | method | `(player: Player, progressionPathName: string, status: Enum.AnalyticsProgressionType, level: number, levelName: string?, customFields: {[string]: any}?)` |
 | `RoMetrics:track` | method | `(eventName: string, opts: { player: Player?, value: number?, props: {[string]: any}? }?)` — custom event with or without a player |
 | `RoMetrics:flush` | method | `()` — schedule an immediate async send (rarely needed) |
-| `RoMetrics.VERSION` | string | `"0.1.0"` |
+| `RoMetrics.VERSION` | string | `"0.3.0"` |
 
 There are no other public members. In particular there is no `RoMetrics.Track`, `RoMetrics:Log`, `RoMetrics:identify`, `RoMetrics:setUserProperty`, `RoMetrics:shutdown`, or client-side API.
 
@@ -107,7 +108,7 @@ Invalid optional values fall back to the default (or are clamped) with a warning
 
 ## 5. Purchases
 
-- **Developer Products**: only via `RoMetrics.wrapProcessReceipt(handler)` (note `.`, not `:`). There can be only one `ProcessReceipt` per game: if the game routes products through a table/router, wrap the router function. The wrapper returns exactly the handler's decision; if the handler errors it returns `NotProcessedYet`. A sale is counted only on `PurchaseGranted`, once per `PurchaseId` per server, price = `CurrencySpent`. Do **not** also log the purchase manually with `LogCustomEvent` (it would double count).
+- **Developer Products**: via `RoMetrics.wrapProcessReceipt(handler)` (note `.`, not `:`), or, when the game already owns `ProcessReceipt` in a shop module, call `RoMetrics.trackReceipt(receiptInfo)` right before it returns `PurchaseGranted`. Never both for the same purchase. There can be only one `ProcessReceipt` per game: if the game routes products through a table/router, wrap the router function. The wrapper returns exactly the handler's decision; if the handler errors it returns `NotProcessedYet`. A sale is counted only on `PurchaseGranted`, once per `PurchaseId` per server, price = `CurrencySpent`. Do **not** also log the purchase manually with `LogCustomEvent` (it would double count).
 - **Game Passes**: automatic (`PromptGamePassPurchaseFinished` with `wasPurchased = true`). Do not add code for them. Purchases made on the website (outside the game) are not observable.
 - **Subscriptions**: not tracked in 0.1.0.
 

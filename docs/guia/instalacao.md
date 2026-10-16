@@ -21,7 +21,7 @@ Assim o SDK consegue copiar o LocalScript de [plataforma](/guia/plataforma) para
 ```toml
 # wally.toml
 [dependencies]
-RoMetrics = "victorcarmo2003/rometrics@0.1.0"
+RoMetrics = "victorcarmo2003/rometrics@0.3.0"
 ```
 
 ```bash

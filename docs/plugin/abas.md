@@ -1,26 +1,24 @@
 # Abas e fluxo de uso
 
-As abas ficam numa barra lateral em três grupos: **Começar** (Início), **Eventos** (Eventos, Rastrear, Código, Fluxos) e **Conferir** (Validação, Config). O selo no topo mostra se o SDK está instalado no place.
+A barra lateral segue a ordem do trabalho. O selo no topo mostra se o SDK está instalado no place.
 
-| Aba | Esquerda | Principal |
-|---|---|---|
-| **Início** | — | checklist de 5 passos: **Instalar do GitHub** (SDK em 1 clique), endereço do servidor + **Testar conexão**, Secret da chave, **Criar script de setup**, primeiros eventos |
-| **Eventos** | árvore com busca, agrupada por tipo (`custom`, `funnel`, `progression`, `economy`) | descrição, props, gatilho, onde é usado (instâncias com tag e linhas de scripts), Novo/Salvar/Renomear/Remover |
-| **Rastrear** | instâncias com a tag `RoMetrics` (clique seleciona no Explorer) | seleção atual → evento, gatilho, valor, cooldown, uma vez, props → **Aplicar** / **Remover rastreio**; "Destacar rastreados" |
-| **Código** | lista de snippets | prévia do código + evento alvo → **Inserir** no script selecionado (ou no script de setup, se nada estiver selecionado) ou **Criar Script** |
-| **Fluxos** | funis do registro | editor de passos (arrastar, renomear, ligar evento ao passo) e diagrama passo → passo |
-| **Validação** | — | erros e avisos com atalho para o evento, instância ou script |
-| **Config** | — | endpoint, nome do Secret, caminho do SDK, **Testar conexão**, URL do dashboard |
+| Aba | Para quê |
+|---|---|
+| **Início** | o que já está pronto neste place, a ação que resolve o que falta e o atalho para **Medir** |
+| **Medir** | "o que você quer medir?": escolha o tipo (evento, funil, progressão, economia) e o assistente gera a linha de código e coloca no script certo |
+| **Vendas** | acha quem atribui o `MarketplaceService.ProcessReceipt` e embrulha com `wrapProcessReceipt` em 1 clique (com prévia e Ctrl+Z) |
+| **Eventos** | registro de eventos: busca, edição, props e onde cada evento é usado |
+| **Ajustes** | endereço do servidor, Secret da chave, **Testar com o site**, **Enviar eventos de teste**, atualizar o SDK e as ferramentas avançadas |
+| Avançado | **Marcar objeto (sem código)**, **Editor de funis** e **Conferir problemas** |
 
 ## Fluxo recomendado
 
-1. **Início**: siga os passos. **Instalar do GitHub** baixa o SDK da última release e coloca em `ReplicatedStorage.RoMetrics`; **Criar script de setup** cria `ServerScriptService.RoMetricsSetup` com `init` e `wrapProcessReceipt`.
-2. Guarde a chave de ingestão no Secret `rometrics_key` (Creator Hub › Secrets; para Play no Studio, File › Experience Settings › Security › Local Secrets).
-3. **Eventos → Novo**: registre os eventos com nome, tipo, descrição e props.
-4. Eventos do mapa: selecione a instância → **Rastrear** → evento, gatilho e cooldown → **Aplicar**.
-5. Eventos de código: **Código** → escolha o snippet e o evento → **Inserir**.
-6. Funis: **Fluxos** → crie o funil, ordene os passos e ligue eventos a cada passo.
-7. Antes de publicar: **Validação** (nomes inválidos, duplicados, eventos usados mas não registrados, tags órfãs, gatilhos sem alvo).
+1. **Início › Instalar do GitHub**: baixa o SDK da última release para `ReplicatedStorage.RoMetrics`.
+2. **Ajustes**: confira o endereço do servidor e guarde a chave no Secret `rometrics_key`.
+3. **Vendas**: embrulhe o `ProcessReceipt` do seu jogo (se ele vende developer products).
+4. **Medir**: crie os eventos que importam e deixe o assistente colocar o código.
+5. **Ajustes › Testar com o site**: cole o código do painel (Configurações › Jogos › Testar conexão). Use **Enviar eventos de teste** para ver como os eventos chegam sem dar Play, depois dê **Play** para o teste real.
+6. Antes de publicar: **Conferir problemas**.
 
 ## Renomear eventos
 

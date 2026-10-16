@@ -1,25 +1,40 @@
 --!strict
--- Shell: header (logo + SDK status), grouped sidebar nav, view area, status bar and modal overlay.
--- Owns shared state (registry, settings, per-view UI state) and re-renders the active view when
--- the place changes.
+-- Shell: header (logo + live status), tab bar, animated view area, toasts and modal overlay.
+-- Owns shared state (registry, settings, per-view UI state, last server check) and re-renders
+-- the active view when the place changes.
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Selection = game:GetService("Selection")
 
+local Lint = require(script.Parent.Lint)
 local Registry = require(script.Parent.Registry)
 local Settings = require(script.Parent.Settings)
 local Studio = require(script.Parent.Studio)
 local Tagging = require(script.Parent.Tagging)
 local Theme = require(script.Parent.Theme)
 local UI = require(script.Parent.UI)
-local Lint = require(script.Parent.Lint)
 
 export type View = {
 	id: string,
 	title: string,
+	-- Shown in the tab bar; other views open from inside a screen and get a "Voltar" link.
+	nav: boolean?,
 	-- Re-render triggers this view cares about.
-	watches: { selection: boolean?, tags: boolean? },
+	watches: { selection: boolean?, tags: boolean?, events: boolean? },
 	render: (app: App, container: Frame) -> (),
+}
+
+export type ToastAction = { text: string, onClick: () -> () }
+
+-- Last answer of the server about this game (via the connection-test code saved in Ajustes).
+export type EventsCheck = {
+	at: number,
+	ok: boolean,
+	message: string,
+	gameName: string?,
+	matches: boolean?,
+	lastEventAt: number?,
 }
 
 export type App = {
@@ -30,14 +45,22 @@ export type App = {
 	registryNotes: { string },
 	registryExists: boolean,
 	tab: string,
+	-- Where "Voltar" goes from a view outside the tab bar.
+	back: string?,
 	state: { [string]: any },
+	events: EventsCheck?,
+	checking: boolean,
 	highlighter: Tagging.Highlighter,
 	views: { View },
 	render: (self: App) -> (),
-	setTab: (self: App, id: string) -> (),
+	setTab: (self: App, id: string, back: string?) -> (),
 	reloadRegistry: (self: App) -> (),
 	saveRegistry: (self: App, registry: Registry.Registry, label: string, extra: (() -> ())?) -> string?,
-	toast: (self: App, message: string, kind: ("info" | "success" | "warning" | "error")?) -> (),
+	toast: (self: App, message: string, kind: ("info" | "success" | "warning" | "error")?, action: ToastAction?) -> (),
+	undo: (self: App) -> (),
+	testCode: (self: App) -> string?,
+	setTestCode: (self: App, code: string?) -> (),
+	checkEvents: (self: App) -> (),
 	usages: (self: App, force: boolean?) -> { Lint.ScriptUsage },
 	split: (self: App, container: Frame, leftWidth: number?) -> (Frame, Frame),
 	destroy: (self: App) -> (),
@@ -46,6 +69,10 @@ export type App = {
 local App = {}
 
 local USAGE_CACHE_SECONDS = 5
+local HEADER_HEIGHT = 52
+local TABS_HEIGHT = 38
+local EVENTS_POLL_SECONDS = 12
+local PLUGIN_VERSION = "0.3.0"
 
 function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): App
 	local settings = Settings.new(plugin)
@@ -57,252 +84,316 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 		registryNotes = {},
 		registryExists = false,
 		tab = settings:get("lastTab"),
+		back = nil,
 		state = {},
+		events = nil,
+		checking = false,
 		views = views,
 	} :: App
 
 	local connections: { RBXScriptConnection } = {}
+	local cleanups: { () -> () } = {}
 	local root: Frame? = nil
-	local content: Frame? = nil
-	local statusLabel: TextLabel? = nil
-	local toastLabel: TextLabel? = nil
+	local content: CanvasGroup? = nil
+	local toastLayer: Frame? = nil
+	local headerStatus: Frame? = nil
 	local toastToken = 0
 	local usageCache: { Lint.ScriptUsage }? = nil
 	local usageAt = 0
 	local lastSerialized: string? = nil
 	local renderQueued = false
 	local registryConnection: RBXScriptConnection? = nil
+	local destroyed = false
 
 	self.highlighter = Tagging.highlighter(Theme.ACCENT)
 
-	local function currentView(): View
+	local function viewById(id: string): View?
 		for _, view in views do
-			if view.id == self.tab then
+			if view.id == id then
 				return view
 			end
 		end
-		return views[1]
+		return nil
 	end
 
-	local function updateStatus()
-		if not statusLabel then
+	local function currentView(): View
+		return viewById(self.tab) or views[1]
+	end
+
+	-- Header status chips -----------------------------------------------------------------------
+
+	local function chip(text: string, state: UI.StatusState, onClick: (() -> ())?): any
+		local p = UI.palette
+		local color = UI.stateColor(state)
+		local button = UI.new(if onClick then "TextButton" else "Frame", {
+			BackgroundColor3 = color,
+			BackgroundTransparency = 0.88,
+			BorderSizePixel = 0,
+			Size = UDim2.fromOffset(0, 24),
+			AutomaticSize = Enum.AutomaticSize.X,
+		}, {
+			UI.new("Frame", { BackgroundColor3 = color, BorderSizePixel = 0, Size = UDim2.fromOffset(7, 7) }, {
+				UI.corner(4),
+			}),
+			UI.label(text, { size = 12, font = Theme.FONT_MEDIUM, color = p.text, autoX = true, height = 24 }),
+		})
+		if onClick then
+			button.AutoButtonColor = false
+			button.Text = ""
+			button.Activated:Connect(onClick)
+			button.MouseEnter:Connect(function()
+				UI.tween(button, { BackgroundTransparency = 0.75 }, 0.1)
+			end)
+			button.MouseLeave:Connect(function()
+				UI.tween(button, { BackgroundTransparency = 0.88 }, 0.15)
+			end)
+		end
+		UI.hlist(6).Parent = button
+		UI.corner(12).Parent = button
+		UI.padding(0, 10, 0, 9).Parent = button
+		return button
+	end
+
+	local function updateHeaderStatus()
+		local holder = headerStatus
+		if not holder then
 			return
 		end
-		local text
-		if self.registryExists then
-			text =
-				`{Registry.MODULE_NAME}: {#self.registry.events} eventos · {#Tagging.tagged()} instâncias rastreadas`
+		UI.clear(holder)
+		local events = self.events
+		local sdk = Studio.sdkModule()
+		if not sdk then
+			chip("Instale o SDK", "warn", function()
+				self:setTab("home")
+			end).Parent = holder
+			return
+		end
+		local age = if events and events.lastEventAt then os.time() - events.lastEventAt else nil
+		if age and age < 120 then
+			chip("Eventos chegando", "busy", function()
+				self:setTab("home")
+			end).Parent = holder
 		else
-			text = `{Registry.MODULE_NAME} ainda não existe (criado ao salvar o primeiro evento)`
+			chip("SDK pronto", "ok", function()
+				self:setTab("home")
+			end).Parent = holder
 		end
-		if #self.registryNotes > 0 then
-			text ..= ` · {#self.registryNotes} aviso(s) ao ler o registro`
-		end
-		statusLabel.Text = text
 	end
 
-	local function renderView()
+	-- View rendering ------------------------------------------------------------------------------
+
+	local function renderView(animate: boolean?)
 		local container = content
 		if not container then
 			return
 		end
 		UI.clear(container)
 		local view = currentView()
-		local ok, err = pcall(view.render :: any, self, container)
+		local frame = UI.new("Frame", {
+			Name = view.id,
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+			Parent = container,
+		})
+		local body = frame
+		if not view.nav then
+			-- Views outside the tab bar: "Voltar" strip on top.
+			local backId = self.back or "home"
+			local backView = viewById(backId)
+			local strip = UI.new("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, 32),
+				Parent = frame,
+			}, {
+				UI.link(`‹  Voltar para {if backView then backView.title else "Início"}`, function()
+					self:setTab(backId)
+				end),
+				UI.label(view.title, {
+					font = Theme.FONT_BOLD,
+					size = 13,
+					color = UI.palette.subText,
+					autoX = true,
+					height = 22,
+				}),
+			})
+			UI.hlist(12).Parent = strip
+			UI.padding(6, 14, 4, 14).Parent = strip
+			body = UI.new("Frame", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(0, 32),
+				Size = UDim2.new(1, 0, 1, -32),
+				Parent = frame,
+			})
+		end
+		local ok, err = pcall(view.render :: any, self, body)
 		if not ok then
-			UI.clear(container)
-			local message =
-				UI.label(`Erro ao desenhar a aba {view.title}: {err}`, { wrap = true, color = UI.palette.danger })
-			message.Parent = container
+			UI.clear(body)
+			local message = UI.notice(`Algo deu errado ao desenhar esta tela: {err}`, "danger")
+			message.Parent = body
 			warn(`[RoMetrics plugin] {err}`)
 		end
-		updateStatus()
+		if animate then
+			container.GroupTransparency = 1
+			frame.Position = UDim2.fromOffset(0, 8)
+			UI.tween(container, { GroupTransparency = 0 }, 0.2)
+			UI.tween(frame, { Position = UDim2.fromOffset(0, 0) }, 0.25)
+		end
+		updateHeaderStatus()
 	end
 
-	-- Sidebar groups, in workflow order (labels already uppercase: string.upper is ASCII-only).
-	-- Views missing here land in the last group.
-	local NAV: { { label: string, ids: { string } } } = {
-		{ label = "COMEÇAR", ids = { "home" } },
-		{ label = "EVENTOS", ids = { "events", "track", "snippets", "flows" } },
-		{ label = "CONFERIR", ids = { "validate", "config" } },
-	}
-	local RAIL_WIDTH = 132
-	local HEADER_HEIGHT = 44
-	local STATUS_HEIGHT = 24
+	-- Shell ---------------------------------------------------------------------------------------
 
-	local function navItem(view: View): TextButton
+	local function buildTabs(): Frame
 		local p = UI.palette
-		local active = view.id == self.tab
-		local item = UI.new("TextButton", {
-			Name = view.id,
-			AutoButtonColor = false,
-			Text = "",
-			BackgroundColor3 = if active then p.accentSoft else p.hover,
-			BackgroundTransparency = if active then 0 else 1,
+		local bar = UI.new("Frame", {
+			Name = "Tabs",
+			BackgroundColor3 = p.panel,
 			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, 30),
-		}, {
-			UI.new("Frame", {
-				Name = "Bar",
-				BackgroundColor3 = p.accent,
-				BackgroundTransparency = if active then 0 else 1,
-				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, 7),
-				Size = UDim2.fromOffset(3, 16),
-			}, { UI.corner(2) }),
-			UI.new("TextLabel", {
+			Position = UDim2.fromOffset(0, HEADER_HEIGHT),
+			Size = UDim2.new(1, 0, 0, TABS_HEIGHT),
+		})
+		local list = UI.new("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+			Parent = bar,
+		})
+		UI.hlist(4, Enum.VerticalAlignment.Bottom).Parent = list
+		UI.padding(0, 10, 0, 10).Parent = list
+		local underline = UI.new("Frame", {
+			Name = "Underline",
+			BackgroundColor3 = p.accent,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.fromOffset(0, 3),
+			ZIndex = 3,
+			Parent = bar,
+		}, { UI.corner(2) })
+		UI.new("Frame", {
+			BackgroundColor3 = p.border,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.fromScale(0, 1),
+			Size = UDim2.new(1, 0, 0, 1),
+			Parent = bar,
+		})
+		local activeId = if currentView().nav then self.tab else (self.back or "home")
+		local activeButton: TextButton? = nil
+		for index, view in views do
+			if not view.nav then
+				continue
+			end
+			local active = view.id == activeId
+			local button = UI.new("TextButton", {
+				Name = view.id,
+				AutoButtonColor = false,
 				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(12, 0),
-				Size = UDim2.new(1, -16, 1, 0),
 				Text = view.title,
 				FontFace = if active then Theme.FONT_BOLD else Theme.FONT_MEDIUM,
 				TextSize = 14,
 				TextColor3 = if active then p.text else p.subText,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				TextTruncate = Enum.TextTruncate.AtEnd,
-			}),
-		})
-		UI.corner(6).Parent = item
-		if not active then
-			item.MouseEnter:Connect(function()
-				item.BackgroundTransparency = 0
+				Size = UDim2.fromScale(0, 1),
+				AutomaticSize = Enum.AutomaticSize.X,
+				LayoutOrder = index,
+				Parent = list,
+			})
+			UI.padding(0, 10, 0, 10).Parent = button
+			if active then
+				activeButton = button
+			else
+				button.MouseEnter:Connect(function()
+					UI.tween(button, { TextColor3 = p.text }, 0.1)
+				end)
+				button.MouseLeave:Connect(function()
+					UI.tween(button, { TextColor3 = p.subText }, 0.15)
+				end)
+			end
+			button.Activated:Connect(function()
+				if self.tab ~= view.id then
+					self:setTab(view.id)
+				end
 			end)
-			item.MouseLeave:Connect(function()
-				item.BackgroundTransparency = 1
-			end)
 		end
-		item.Activated:Connect(function()
-			self:setTab(view.id)
-		end)
-		return item
-	end
-
-	local function buildRail(): (Frame, Frame)
-		local p = UI.palette
-		local byId: { [string]: View } = {}
-		local placed: { [string]: boolean } = {}
-		for _, view in views do
-			byId[view.id] = view
+		-- Slide the underline from the previous tab to the active one. Auto-sized tabs get their final
+		-- size a frame or two later, so follow the tab's position/size until it settles.
+		local previous = self.state.__underline
+		if previous then
+			underline.Position = UDim2.new(0, previous.x, 1, 0)
+			underline.Size = UDim2.fromOffset(previous.width, 3)
 		end
-		local rail = UI.scroll({
-			Name = "Nav",
-			BackgroundColor3 = p.sidebar,
-			BackgroundTransparency = 0,
-			Position = UDim2.fromOffset(0, HEADER_HEIGHT),
-			Size = UDim2.new(0, RAIL_WIDTH, 1, -HEADER_HEIGHT - STATUS_HEIGHT),
-			ScrollBarThickness = 0,
-		}, 2, 8)
-		for index, group in NAV do
-			local items: { View } = {}
-			for _, id in group.ids do
-				if byId[id] then
-					table.insert(items, byId[id])
-					placed[id] = true
+		local target = activeButton
+		if target then
+			local function follow()
+				if not target.Parent or bar.AbsoluteSize.X == 0 then
+					return
 				end
+				local x = target.AbsolutePosition.X - bar.AbsolutePosition.X + 10
+				local width = math.max(0, target.AbsoluteSize.X - 20)
+				UI.tween(underline, { Position = UDim2.new(0, x, 1, 0), Size = UDim2.fromOffset(width, 3) }, 0.25)
+				self.state.__underline = { x = x, width = width }
 			end
-			if index == #NAV then
-				for _, view in views do
-					if not placed[view.id] then
-						table.insert(items, view)
-					end
-				end
-			end
-			if #items > 0 then
-				local heading = UI.label(group.label, {
-					font = Theme.FONT_BOLD,
-					size = 11,
-					color = p.dimText,
-					height = if index == 1 then 20 else 30,
-				})
-				heading.TextYAlignment = Enum.TextYAlignment.Bottom
-				UI.padding(0, 0, 4, 12).Parent = heading
-				heading.Parent = rail
-				for _, view in items do
-					navItem(view).Parent = rail
-				end
-			end
+			target:GetPropertyChangedSignal("AbsolutePosition"):Connect(follow)
+			target:GetPropertyChangedSignal("AbsoluteSize"):Connect(follow)
+			task.defer(follow)
 		end
-		local border = UI.new("Frame", {
-			Name = "NavBorder",
-			BackgroundColor3 = p.border,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.fromOffset(RAIL_WIDTH, HEADER_HEIGHT),
-			Size = UDim2.new(0, 1, 1, -HEADER_HEIGHT - STATUS_HEIGHT),
-		})
-		return rail, border
+		return bar
 	end
 
 	local function buildHeader(): Frame
 		local p = UI.palette
-		local sdk = Studio.sdkModule()
-		local version = if sdk then sdk:GetAttribute("RM_Version") else nil
 		local brand = UI.row(10, {
-			UI.logo(22),
+			UI.logo(28),
 			UI.column(0, {
-				UI.label("RoMetrics", { font = Theme.FONT_BOLD, size = 15, height = 18 }),
-				UI.label("Analytics para o seu jogo", { size = 11, color = p.dimText, height = 14 }),
-			}, { Size = UDim2.fromOffset(170, 0) }),
-		}, { Size = UDim2.new(1, -180, 1, 0) })
-		local pill = if sdk
-			then UI.pill(if type(version) == "string" then `SDK {version}` else "SDK instalado", p.success, function()
-				self:setTab("home")
-			end)
-			else UI.pill("SDK não instalado", p.warning, function()
-				self:setTab("home")
-			end)
-		pill.AnchorPoint = Vector2.new(1, 0.5)
-		pill.Position = UDim2.fromScale(1, 0.5)
+				UI.label("RoMetrics", { font = Theme.FONT_BOLD, size = 16, height = 20 }),
+				UI.label("Analytics do seu jogo", { size = 12, color = p.dimText, height = 15 }),
+			}, { Size = UDim2.fromOffset(160, 0) }),
+		}, { Size = UDim2.new(1, -200, 1, 0) })
+		local status = UI.new("Frame", {
+			Name = "Status",
+			BackgroundTransparency = 1,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.new(0, 200, 1, 0),
+		})
+		local layout = UI.hlist(6, Enum.VerticalAlignment.Center)
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+		layout.Parent = status
+		headerStatus = status
 		local header = UI.new("Frame", {
 			Name = "Header",
 			BackgroundColor3 = p.panel,
 			BorderSizePixel = 0,
 			Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
-		}, { brand, pill })
-		UI.padding(0, 12, 0, 12).Parent = header
-		UI.new("Frame", {
-			BackgroundColor3 = p.border,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0, 1),
-			Position = UDim2.new(0, -12, 1, 0),
-			Size = UDim2.new(1, 24, 0, 1),
-			Parent = header,
-		})
+		}, { brand, status })
+		UI.padding(0, 14, 0, 14).Parent = header
 		return header
 	end
 
-	local function buildShell()
+	local function buildShell(animate: boolean?)
 		if root then
 			root:Destroy()
 		end
 		UI.setPalette(Theme.current())
 		local p = UI.palette
 
-		local body = UI.new("Frame", {
+		local body = UI.new("CanvasGroup", {
 			Name = "Content",
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(RAIL_WIDTH, HEADER_HEIGHT),
-			Size = UDim2.new(1, -RAIL_WIDTH, 1, -HEADER_HEIGHT - STATUS_HEIGHT),
-			ClipsDescendants = true,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(0, HEADER_HEIGHT + TABS_HEIGHT),
+			Size = UDim2.new(1, 0, 1, -HEADER_HEIGHT - TABS_HEIGHT),
 		})
 		content = body
 
-		local status = UI.label("", { size = Theme.SMALL_SIZE, color = p.subText })
-		status.Size = UDim2.fromScale(0.6, 1)
-		statusLabel = status
-		local toast = UI.label("", { size = Theme.SMALL_SIZE, color = p.subText, alignX = Enum.TextXAlignment.Right })
-		toast.Size = UDim2.fromScale(0.4, 1)
-		toast.Position = UDim2.fromScale(0.6, 0)
-		toastLabel = toast
-		local statusBar = UI.new("Frame", {
-			Name = "Status",
-			BackgroundColor3 = p.panel,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0, 1),
-			Position = UDim2.fromScale(0, 1),
-			Size = UDim2.new(1, 0, 0, STATUS_HEIGHT),
-		}, { status, toast })
-		UI.padding(0, 10, 0, 10).Parent = statusBar
+		local toasts = UI.new("Frame", {
+			Name = "Toasts",
+			BackgroundTransparency = 1,
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -12),
+			Size = UDim2.new(1, -24, 0, 0),
+			ZIndex = 40,
+		})
+		toastLayer = toasts
 
 		local overlay = UI.new("Frame", {
 			Name = "Overlay",
@@ -312,16 +403,15 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 		})
 		UI.setOverlay(overlay)
 
-		local rail, railBorder = buildRail()
 		local newRoot = UI.new("Frame", {
 			Name = "RoMetrics",
 			BackgroundColor3 = p.background,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
-		}, { buildHeader(), rail, railBorder, body, statusBar, overlay })
+		}, { buildHeader(), buildTabs(), body, toasts, overlay })
 		newRoot.Parent = widget
 		root = newRoot
-		renderView()
+		renderView(animate)
 	end
 
 	local function watchRegistryModule()
@@ -350,18 +440,27 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 		renderQueued = true
 		task.delay(0.15, function()
 			renderQueued = false
-			renderView()
+			if not destroyed then
+				renderView(false)
+			end
 		end)
 	end
 
 	function self.render(_: App)
-		buildShell()
+		buildShell(false)
 	end
 
-	function self.setTab(_: App, id: string)
+	function self.setTab(_: App, id: string, back: string?)
+		local from = self.tab
 		self.tab = id
-		settings:set("lastTab", id)
-		buildShell()
+		local view = viewById(id)
+		if view and view.nav then
+			settings:set("lastTab", id)
+			self.back = nil
+		else
+			self.back = back or (if viewById(from) and (viewById(from) :: View).nav then from else self.back)
+		end
+		buildShell(true)
 	end
 
 	function self.reloadRegistry(_: App)
@@ -384,7 +483,7 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 			end
 		end)
 		if err then
-			self:toast(`Falha ao salvar: {err}`, "error")
+			self:toast(`Não deu para salvar: {err}`, "error")
 			return err
 		end
 		lastSerialized = source
@@ -392,30 +491,121 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 		self.registryNotes = {}
 		self.registryExists = true
 		watchRegistryModule()
-		self:toast(`Salvo: {label}`, "success")
+		self:toast(`Salvo: {label}`, "success", {
+			text = "Desfazer",
+			onClick = function()
+				self:undo()
+			end,
+		})
 		queueRender()
 		return nil
 	end
 
-	function self.toast(_: App, message: string, kind)
-		local label = toastLabel
-		if not label then
+	function self.undo(_: App)
+		local ok = pcall(function()
+			ChangeHistoryService:Undo()
+		end)
+		self:toast(if ok then "Desfeito." else "Use Ctrl+Z para desfazer.", "info")
+		usageCache = nil
+		queueRender()
+	end
+
+	function self.toast(_: App, message: string, kind, action: ToastAction?)
+		local layer = toastLayer
+		if not layer then
 			return
 		end
 		local p = UI.palette
-		label.Text = message
-		label.TextColor3 = if kind == "error"
+		UI.clear(layer)
+		local color = if kind == "error"
 			then p.danger
 			elseif kind == "warning" then p.warning
 			elseif kind == "success" then p.success
-			else p.subText
+			else p.accent
+		local glyph = if kind == "error" then "!" elseif kind == "warning" then "!" elseif kind == "success" then "✓" else "i"
+		local text = UI.label(message, { wrap = true, size = 13, color = p.text })
+		text.Size = UDim2.fromScale(0, 0)
+		text.AutomaticSize = Enum.AutomaticSize.Y
+		UI.flex().Parent = text
+		local children: { any } = { UI.icon(glyph, color, 24), text }
+		if action then
+			table.insert(
+				children,
+				UI.button(action.text, {
+					variant = "ghost",
+					onClick = function()
+						UI.clear(layer)
+						action.onClick()
+					end,
+				})
+			)
+		end
+		local card = UI.card(children, { horizontal = true, gap = 10, padding = 10, stroke = color:Lerp(p.border, 0.5) })
+		card.AnchorPoint = Vector2.new(0, 1)
+		card.Position = UDim2.new(0, 0, 1, 40)
+		card.BackgroundTransparency = 0
+		UI.new("UISizeConstraint", { MaxSize = Vector2.new(520, math.huge), Parent = card })
+		card.Parent = layer
+		UI.tween(card, { Position = UDim2.fromScale(0, 1) }, 0.25, Enum.EasingStyle.Back)
 		toastToken += 1
 		local token = toastToken
-		task.delay(5, function()
-			if token == toastToken and label.Parent then
-				label.Text = ""
+		task.delay(if action then 8 else 4, function()
+			if token == toastToken and card.Parent then
+				local tween = UI.tween(card, { Position = UDim2.new(0, 0, 1, 80) }, 0.2)
+				if tween then
+					tween.Completed:Wait()
+				end
+				if token == toastToken then
+					card:Destroy()
+				end
 			end
 		end)
+	end
+
+	local codeKey = `RoMetrics_testCode_{game.PlaceId}`
+
+	function self.testCode(_: App): string?
+		local ok, code = pcall(function()
+			return plugin:GetSetting(codeKey)
+		end)
+		return if ok and type(code) == "string" and code ~= "" then code else nil
+	end
+
+	function self.setTestCode(_: App, code: string?)
+		pcall(function()
+			plugin:SetSetting(codeKey, code)
+		end)
+	end
+
+	-- Asks the server when it last received an event from this game. Yields; never throws.
+	function self.checkEvents(_: App)
+		local code = self:testCode()
+		if not code or self.checking then
+			return
+		end
+		self.checking = true
+		local endpoint = settings:get("endpoint")
+		local ok, message, gameName, matches, lastEventAt =
+			Studio.reportConnectionTest(endpoint, code, Studio.placeReport(endpoint, PLUGIN_VERSION))
+		self.checking = false
+		self.events = {
+			at = os.time(),
+			ok = ok,
+			message = message,
+			gameName = gameName,
+			matches = matches,
+			lastEventAt = lastEventAt,
+		}
+		if not ok and string.find(message, "expirado", 1, true) then
+			self:setTestCode(nil)
+		end
+		if widget.Enabled and not destroyed then
+			if currentView().watches.events then
+				queueRender()
+			else
+				updateHeaderStatus()
+			end
+		end
 	end
 
 	function self.usages(_: App, force: boolean?): { Lint.ScriptUsage }
@@ -459,8 +649,12 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 	end
 
 	function self.destroy(_: App)
+		destroyed = true
 		for _, connection in connections do
 			connection:Disconnect()
+		end
+		for _, cleanup in cleanups do
+			cleanup()
 		end
 		if registryConnection then
 			registryConnection:Disconnect()
@@ -501,8 +695,6 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 	local function onTagsChanged()
 		if widget.Enabled and currentView().watches.tags then
 			queueRender()
-		else
-			updateStatus()
 		end
 	end
 	table.insert(connections, CollectionService:GetInstanceAddedSignal(Tagging.TAG):Connect(onTagsChanged))
@@ -515,17 +707,25 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 			end
 		end)
 	)
-	local disconnectTheme = Theme.onChanged(function()
-		buildShell()
+	table.insert(cleanups, Theme.onChanged(function()
+		buildShell(false)
+	end))
+	table.insert(cleanups, Studio.watchEditor(function()
+		if widget.Enabled and currentView().watches.cursor then
+			queueRender()
+		end
+	end))
+
+	-- "Eventos chegando": while the panel is open, ask the server every few seconds (only once a
+	-- connection-test code was saved in Ajustes; the code expires after 15 min).
+	task.spawn(function()
+		while not destroyed do
+			if widget.Enabled and self:testCode() then
+				pcall(self.checkEvents, self)
+			end
+			task.wait(EVENTS_POLL_SECONDS)
+		end
 	end)
-	table.insert(
-		connections,
-		{
-			Disconnect = function()
-				disconnectTheme()
-			end,
-		} :: any
-	)
 
 	self.highlighter:setEnabled(settings:get("highlight"))
 	local registry, notes, exists = Studio.loadRegistry()
@@ -535,7 +735,10 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 	local module = Studio.registryModule()
 	lastSerialized = if module then Studio.getSource(module) else nil
 	watchRegistryModule()
-	buildShell()
+	if not viewById(self.tab) or not (viewById(self.tab) :: View).nav then
+		self.tab = "home"
+	end
+	buildShell(true)
 	return self
 end
 

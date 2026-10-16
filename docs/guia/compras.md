@@ -25,8 +25,21 @@ O que o wrapper garante:
 - Funciona mesmo se `init` não rodou: o handler executa normalmente, só não há rastreio.
 
 ::: warning Só um ProcessReceipt
-A Roblox aceita um único `ProcessReceipt` por jogo. Se você usa um roteador de produtos, embrulhe o roteador inteiro.
+A Roblox aceita um único `ProcessReceipt` por jogo: a **última atribuição vence**, sem aviso. Se você usa um roteador de produtos, embrulhe o roteador inteiro, na linha onde o seu jogo já atribui. Nunca crie um segundo `ProcessReceipt` só para o RoMetrics. O plugin (aba **Vendas**) acha essa linha e embrulha com 1 clique.
 :::
+
+### Seu jogo já tem o próprio ProcessReceipt? Use `trackReceipt`
+
+Se preferir não embrulhar, chame `RoMetrics.trackReceipt(receiptInfo)` logo antes de devolver `PurchaseGranted`. Use **um ou outro**, nunca os dois para a mesma compra:
+
+```lua
+-- dentro do ProcessReceipt que o seu jogo já tem
+grantItem(player, receiptInfo.ProductId)
+RoMetrics.trackReceipt(receiptInfo)
+return Enum.ProductPurchaseDecision.PurchaseGranted
+```
+
+Se um produto for comprado e nada for registrado em 30 s, o SDK avisa uma vez no Output: sinal de que o `ProcessReceipt` embrulhado foi substituído por outro.
 
 ## Game Passes
 

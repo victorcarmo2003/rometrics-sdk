@@ -1,9 +1,25 @@
 --!strict
 -- Small instance factory plus the plugin's widgets (UI Labs-like controls), built on native
 -- Frames/TextLabels. Views rebuild regions instead of diffing, so components are plain functions.
+local TweenService = game:GetService("TweenService")
+
 local Theme = require(script.Parent.Theme)
 
 local UI = {}
+
+-- Short ease-out tween (hover, fades, toasts). Never throws.
+function UI.tween(instance: Instance, goals: { [string]: any }, duration: number?, style: Enum.EasingStyle?): Tween?
+	local ok, tween = pcall(function()
+		local t = TweenService:Create(
+			instance,
+			TweenInfo.new(duration or 0.18, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			goals
+		)
+		t:Play()
+		return t
+	end)
+	return if ok then tween else nil
+end
 
 UI.palette = Theme.current()
 local overlayRoot: GuiObject? = nil
@@ -185,7 +201,7 @@ function UI.section(title: string, right: { any }?, props: Props?): (any, any)
 	local p = UI.palette
 	local header = UI.row(6, {
 		UI.label(
-			string.upper(title),
+			UI.upper(title),
 			{ font = Theme.FONT_BOLD, size = Theme.SMALL_SIZE, color = p.subText, autoX = true }
 		),
 	}, { Size = UDim2.new(1, 0, 0, 22) })
@@ -201,7 +217,7 @@ function UI.section(title: string, right: { any }?, props: Props?): (any, any)
 	end
 	local content = UI.column(6)
 	local base: Props = {
-		BackgroundColor3 = p.panel,
+		BackgroundColor3 = p.card,
 		BorderSizePixel = 0,
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
@@ -211,9 +227,9 @@ function UI.section(title: string, right: { any }?, props: Props?): (any, any)
 	end
 	local panel = UI.new("Frame", base, { header, content })
 	UI.vlist(6).Parent = panel
-	UI.padding(10).Parent = panel
-	UI.corner(6).Parent = panel
-	UI.stroke(p.border).Parent = panel
+	UI.padding(12).Parent = panel
+	UI.corner(8).Parent = panel
+	UI.stroke(p.cardBorder).Parent = panel
 	return panel, content
 end
 
@@ -319,21 +335,31 @@ function UI.button(text: string, opts: ButtonOptions?): any
 		Active = not o.disabled,
 	})
 	UI.corner().Parent = button
-	UI.padding(0, 10, 0, 10).Parent = button
+	UI.padding(0, 12, 0, 12).Parent = button
 	if variant == "secondary" then
 		UI.stroke(p.border).Parent = button
 	end
-	if not o.disabled then
+	if o.disabled then
+		button.BackgroundTransparency = math.max(transparency, 0.5)
+	else
+		local hover = if variant == "primary"
+			then bg:Lerp(Color3.new(1, 1, 1), 0.12)
+			else bg:Lerp(if p.isDark then Color3.new(1, 1, 1) else Color3.new(0, 0, 0), 0.06)
 		button.MouseEnter:Connect(function()
 			if variant == "ghost" then
-				button.BackgroundTransparency = 0
+				UI.tween(button, { BackgroundTransparency = 0 }, 0.12)
 			else
-				button.BackgroundColor3 = bg:Lerp(Color3.new(1, 1, 1), 0.08)
+				UI.tween(button, { BackgroundColor3 = hover }, 0.12)
 			end
 		end)
 		button.MouseLeave:Connect(function()
-			button.BackgroundTransparency = transparency
-			button.BackgroundColor3 = bg
+			UI.tween(button, { BackgroundTransparency = transparency, BackgroundColor3 = bg }, 0.15)
+		end)
+		button.MouseButton1Down:Connect(function()
+			UI.tween(button, { BackgroundColor3 = bg:Lerp(Color3.new(0, 0, 0), 0.12) }, 0.06)
+		end)
+		button.MouseButton1Up:Connect(function()
+			UI.tween(button, { BackgroundColor3 = hover }, 0.1)
 		end)
 		if o.onClick then
 			local onClick = o.onClick
@@ -960,7 +986,7 @@ function UI.step(o: StepOptions): any
 	end
 
 	local card = UI.new("Frame", {
-		BackgroundColor3 = p.panel,
+		BackgroundColor3 = p.card,
 		BorderSizePixel = 0,
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
@@ -994,6 +1020,514 @@ function UI.notice(text: string, kind: ("info" | "warning" | "success" | "danger
 	UI.padding(8, 10, 8, 10).Parent = box
 	UI.stroke(color:Lerp(p.border, 0.5)).Parent = box
 	return box
+end
+
+-- Uppercase that also handles Portuguese accents (string.upper is ASCII-only: "Seleção" -> "SELEçãO").
+local ACCENTS_UPPER = {
+	["á"] = "Á",
+	["à"] = "À",
+	["â"] = "Â",
+	["ã"] = "Ã",
+	["é"] = "É",
+	["ê"] = "Ê",
+	["í"] = "Í",
+	["ó"] = "Ó",
+	["ô"] = "Ô",
+	["õ"] = "Õ",
+	["ú"] = "Ú",
+	["ç"] = "Ç",
+}
+function UI.upper(text: string): string
+	local out = string.upper(text)
+	for lower, upper in ACCENTS_UPPER do
+		out = string.gsub(out, lower, upper)
+	end
+	return out
+end
+
+-- Escapes text for RichText labels.
+function UI.escape(text: string): string
+	return (string.gsub(text, "[<>&\"]", { ["<"] = "&lt;", [">"] = "&gt;", ["&"] = "&amp;", ['"'] = "&quot;" }))
+end
+
+-- Cards and assistant widgets ---------------------------------------------------------------------
+
+export type CardOptions = {
+	padding: number?,
+	gap: number?,
+	stroke: Color3?,
+	color: Color3?,
+	onClick: (() -> ())?,
+	horizontal: boolean?,
+}
+
+-- Rounded card (auto height). Clickable cards get a hover tint.
+function UI.card(children: { any }?, opts: CardOptions?): any
+	local o: CardOptions = opts or {}
+	local p = UI.palette
+	local base = o.color or p.card
+	local card = UI.new(if o.onClick then "TextButton" else "Frame", {
+		BackgroundColor3 = base,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, children)
+	if o.onClick then
+		local onClick = o.onClick
+		card.AutoButtonColor = false
+		card.Text = ""
+		card.MouseEnter:Connect(function()
+			UI.tween(card, { BackgroundColor3 = p.cardHover }, 0.12)
+		end)
+		card.MouseLeave:Connect(function()
+			UI.tween(card, { BackgroundColor3 = base }, 0.15)
+		end)
+		card.Activated:Connect(function()
+			onClick()
+		end)
+	end
+	if o.horizontal then
+		UI.hlist(o.gap or 10, Enum.VerticalAlignment.Center).Parent = card
+	else
+		UI.vlist(o.gap or 8).Parent = card
+	end
+	autoOrder(card)
+	UI.padding(o.padding or 14).Parent = card
+	UI.corner(10).Parent = card
+	UI.stroke(o.stroke or p.cardBorder).Parent = card
+	return card
+end
+
+-- Round colored icon with a glyph or emoji.
+function UI.icon(glyph: string, color: Color3, size: number?): any
+	local s = size or 32
+	local frame = UI.new("Frame", {
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.82,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(s, s),
+	}, {
+		UI.new("TextLabel", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+			Text = glyph,
+			FontFace = Theme.FONT_BOLD,
+			TextSize = math.floor(s * 0.5),
+			TextColor3 = color,
+		}),
+	})
+	UI.corner(math.floor(s / 2)).Parent = frame
+	return frame
+end
+
+export type ChoiceOptions = {
+	icon: string,
+	color: Color3,
+	title: string,
+	description: string,
+	badge: string?,
+	onClick: () -> (),
+}
+
+-- Big option card for "o que você quer medir?".
+function UI.choice(o: ChoiceOptions): any
+	local p = UI.palette
+	local titleRow = UI.row(6, {
+		UI.label(o.title, { font = Theme.FONT_BOLD, size = 15, autoX = true, height = 20 }),
+	}, { Size = UDim2.new(1, 0, 0, 20) })
+	if o.badge then
+		local badge = UI.badge(o.badge, o.color)
+		badge.LayoutOrder = 5
+		badge.Parent = titleRow
+	end
+	local text = UI.column(2, {
+		titleRow,
+		UI.label(o.description, { wrap = true, size = 13, color = p.subText }),
+	})
+	text.Size = UDim2.fromScale(0, 0)
+	UI.flex().Parent = text
+	local arrow = UI.label("›", { font = Theme.FONT_BOLD, size = 22, color = p.dimText, autoX = true, height = 32 })
+	local card = UI.card({ UI.icon(o.icon, o.color, 36), text, arrow }, {
+		horizontal = true,
+		gap = 12,
+		padding = 12,
+		onClick = o.onClick,
+	})
+	card.MouseEnter:Connect(function()
+		UI.tween(arrow, { TextColor3 = o.color }, 0.12)
+	end)
+	card.MouseLeave:Connect(function()
+		UI.tween(arrow, { TextColor3 = p.dimText }, 0.15)
+	end)
+	return card
+end
+
+export type StatusState = "ok" | "todo" | "warn" | "error" | "off" | "busy"
+
+local function stateColor(state: StatusState): Color3
+	local p = UI.palette
+	if state == "ok" then
+		return p.success
+	elseif state == "warn" then
+		return p.warning
+	elseif state == "error" then
+		return p.danger
+	elseif state == "todo" or state == "busy" then
+		return p.accent
+	end
+	return p.dimText
+end
+UI.stateColor = stateColor
+
+-- Pulsing dot (live/busy indicators).
+function UI.dot(state: StatusState, size: number?): any
+	local s = size or 10
+	local color = stateColor(state)
+	local holder = UI.new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(s + 8, s + 8) })
+	local halo = UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(s, s),
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.6,
+		BorderSizePixel = 0,
+		Parent = holder,
+	}, { UI.corner(math.ceil((s + 8) / 2)) })
+	UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(s, s),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+		Parent = holder,
+	}, { UI.corner(math.ceil(s / 2)) })
+	if state == "busy" or state == "ok" then
+		-- Slow "breathing" halo; stops when the dot leaves the tree.
+		task.defer(function()
+			while holder.Parent ~= nil do
+				halo.Size = UDim2.fromOffset(s, s)
+				halo.BackgroundTransparency = 0.55
+				UI.tween(halo, { Size = UDim2.fromOffset(s + 8, s + 8), BackgroundTransparency = 1 }, 1.2, Enum.EasingStyle.Sine)
+				task.wait(if state == "busy" then 1.3 else 2.6)
+			end
+		end)
+	else
+		halo.Visible = false
+	end
+	return holder
+end
+
+export type StatusRowOptions = {
+	state: StatusState,
+	title: string,
+	detail: string?,
+	actions: { any }?,
+}
+
+-- One line of the live checklist: dot, title + detail, actions on the right.
+function UI.statusRow(o: StatusRowOptions): any
+	local p = UI.palette
+	local text = UI.column(1, {
+		UI.label(o.title, { font = Theme.FONT_MEDIUM, size = 14, height = 20 }),
+	})
+	if o.detail then
+		UI.label(o.detail, { wrap = true, size = 12, color = p.subText, rich = true }).Parent = text
+	end
+	text.Size = UDim2.fromScale(0, 0)
+	UI.flex().Parent = text
+	local row = UI.new("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, { UI.dot(o.state), text })
+	for index, action in (o.actions or {}) :: { any } do
+		action.LayoutOrder = 10 + index
+		action.Parent = row
+	end
+	UI.hlist(10, Enum.VerticalAlignment.Center).Parent = row
+	UI.padding(6, 0, 6, 0).Parent = row
+	return row
+end
+
+-- Read-only code preview (selectable, monospaced). Returns (frame, setText).
+function UI.code(text: string, opts: { maxHeight: number? }?): (any, (text: string) -> ())
+	local p = UI.palette
+	local box = UI.new("TextBox", {
+		BackgroundTransparency = 1,
+		ClearTextOnFocus = false,
+		TextEditable = false,
+		MultiLine = true,
+		Text = text,
+		FontFace = Theme.FONT_CODE,
+		TextSize = 13,
+		TextColor3 = p.text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextWrapped = true,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	})
+	local frame = UI.new("Frame", {
+		BackgroundColor3 = p.codeBackground,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, { box })
+	UI.corner(8).Parent = frame
+	UI.padding(10, 12, 10, 12).Parent = frame
+	UI.stroke(p.border).Parent = frame
+	local _ = opts
+	return frame, function(newText: string)
+		box.Text = newText
+	end
+end
+
+export type DiffLine = { kind: string, text: string, line: number? }
+
+-- Before/after preview: removed lines red, added lines green, line numbers on the left.
+function UI.diff(lines: { DiffLine }): any
+	local p = UI.palette
+	local list = UI.column(0)
+	for _, line in lines do
+		local color = if line.kind == "add" then p.success elseif line.kind == "remove" then p.danger else nil
+		local sign = if line.kind == "add" then "+" elseif line.kind == "remove" then "−" else " "
+		local text = string.gsub(line.text, "\t", "    ")
+		local row = UI.new("Frame", {
+			BackgroundColor3 = color or p.codeBackground,
+			BackgroundTransparency = if color then 0.85 else 1,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+		}, {
+			UI.new("TextLabel", {
+				BackgroundTransparency = 1,
+				Size = UDim2.fromOffset(46, 16),
+				TextYAlignment = Enum.TextYAlignment.Top,
+				Text = if line.kind == "gap" then "" else `{line.line or ""} {sign}`,
+				FontFace = Theme.FONT_CODE,
+				TextSize = 12,
+				TextColor3 = color or p.dimText,
+				TextXAlignment = Enum.TextXAlignment.Right,
+			}),
+			UI.new("TextLabel", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(54, 0),
+				Size = UDim2.new(1, -58, 0, 16),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				Text = if line.kind == "gap" then "⋯" else text,
+				FontFace = Theme.FONT_CODE,
+				TextSize = 12,
+				TextColor3 = if line.kind == "same" or line.kind == "gap" then p.subText else p.text,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				TextWrapped = true,
+			}),
+		})
+		UI.padding(1, 0, 1, 0).Parent = row
+		row.Parent = list
+	end
+	local frame = UI.new("Frame", {
+		BackgroundColor3 = p.codeBackground,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		ClipsDescendants = true,
+	}, { list })
+	UI.corner(8).Parent = frame
+	UI.padding(8, 8, 8, 0).Parent = frame
+	UI.stroke(p.border).Parent = frame
+	return frame
+end
+
+-- Segmented control: one button per option, the active one filled with the accent.
+function UI.segmented(options: { Option }, value: any, onChange: (value: any) -> ()): any
+	local p = UI.palette
+	local frame = UI.new("Frame", {
+		BackgroundColor3 = p.input,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 32),
+	})
+	UI.corner(8).Parent = frame
+	UI.stroke(p.inputBorder).Parent = frame
+	UI.padding(3).Parent = frame
+	UI.hlist(3).Parent = frame
+	local buttons: { [any]: TextButton } = {}
+	local function paint(current: any)
+		for optionValue, button in buttons do
+			local active = optionValue == current
+			UI.tween(button, {
+				BackgroundTransparency = if active then 0 else 1,
+				TextColor3 = if active then p.accentText else p.subText,
+			}, 0.15)
+		end
+	end
+	for index, option in options do
+		local button = UI.new("TextButton", {
+			AutoButtonColor = false,
+			BackgroundColor3 = p.accent,
+			BackgroundTransparency = if option.value == value then 0 else 1,
+			Text = option.label,
+			FontFace = Theme.FONT_MEDIUM,
+			TextSize = 13,
+			TextColor3 = if option.value == value then p.accentText else p.subText,
+			Size = UDim2.fromScale(1 / #options, 1),
+			LayoutOrder = index,
+			Parent = frame,
+		})
+		UI.flex().Parent = button
+		UI.corner(6).Parent = button
+		buttons[option.value] = button
+		button.Activated:Connect(function()
+			paint(option.value)
+			onChange(option.value)
+		end)
+	end
+	return frame
+end
+
+-- Form field: label above, control, optional hint below.
+function UI.field(label: string, control: any, hint: string?): any
+	local p = UI.palette
+	local column = UI.column(4, {
+		UI.label(label, { font = Theme.FONT_MEDIUM, size = 13, height = 18 }),
+		control,
+	})
+	if hint then
+		UI.label(hint, { wrap = true, size = 12, color = p.dimText, rich = true }).Parent = column
+	end
+	return column
+end
+
+-- Big friendly title for a screen.
+function UI.heading(title: string, subtitle: string?): any
+	local p = UI.palette
+	local column = UI.column(2, {
+		UI.label(title, { font = Theme.FONT_BOLD, size = 20, height = 28 }),
+	})
+	if subtitle then
+		UI.label(subtitle, { wrap = true, size = 13, color = p.subText, rich = true }).Parent = column
+	end
+	return column
+end
+
+-- Empty state: icon, title, text and an optional action.
+function UI.empty(glyph: string, title: string, text: string, action: any?): any
+	local p = UI.palette
+	local column = UI.column(6, {
+		UI.icon(glyph, p.accent, 44),
+		UI.label(title, { font = Theme.FONT_BOLD, size = 15, height = 20, alignX = Enum.TextXAlignment.Center }),
+		UI.label(text, { wrap = true, size = 13, color = p.subText, alignX = Enum.TextXAlignment.Center }),
+	})
+	local layout = column:FindFirstChildOfClass("UIListLayout") :: UIListLayout
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	if action then
+		action.Parent = column
+	end
+	UI.padding(18, 12, 18, 12).Parent = column
+	return column
+end
+
+-- Small text link ("← Voltar", "ver mudança").
+function UI.link(text: string, onClick: () -> (), color: Color3?): any
+	local p = UI.palette
+	local button = UI.new("TextButton", {
+		AutoButtonColor = false,
+		BackgroundTransparency = 1,
+		Text = text,
+		FontFace = Theme.FONT_MEDIUM,
+		TextSize = 13,
+		TextColor3 = color or p.accent,
+		Size = UDim2.fromOffset(0, 22),
+		AutomaticSize = Enum.AutomaticSize.X,
+	})
+	button.MouseEnter:Connect(function()
+		button.TextTransparency = 0.25
+	end)
+	button.MouseLeave:Connect(function()
+		button.TextTransparency = 0
+	end)
+	button.Activated:Connect(function()
+		onClick()
+	end)
+	return button
+end
+
+-- Horizontal progress bar (0..1), animated.
+function UI.progress(fraction: number, color: Color3?): any
+	local p = UI.palette
+	local track = UI.new("Frame", {
+		BackgroundColor3 = p.input,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 6),
+	}, { UI.corner(3) })
+	local fill = UI.new("Frame", {
+		BackgroundColor3 = color or p.accent,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(0, 1),
+		Parent = track,
+	}, { UI.corner(3) })
+	task.defer(function()
+		UI.tween(fill, { Size = UDim2.fromScale(math.clamp(fraction, 0, 1), 1) }, 0.6)
+	end)
+	return track
+end
+
+-- Radio-like option list (one line each).
+function UI.radio(options: { Option & { hint: string?, disabled: boolean? } }, value: any, onChange: (value: any) -> ()): any
+	local p = UI.palette
+	local column = UI.column(6)
+	for _, option in options do
+		local active = option.value == value
+		local mark = UI.new("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(16, 16),
+		}, {
+			UI.corner(8),
+			UI.stroke(if active then p.accent else p.subText, 2),
+			UI.new("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(8, 8),
+				BackgroundColor3 = p.accent,
+				BackgroundTransparency = if active then 0 else 1,
+				BorderSizePixel = 0,
+			}, { UI.corner(4) }),
+		})
+		local text = UI.column(0, {
+			UI.label(option.label, {
+				size = 13,
+				font = if active then Theme.FONT_MEDIUM else Theme.FONT,
+				color = if option.disabled then p.dimText else p.text,
+				wrap = true,
+				rich = true,
+			}),
+		})
+		if option.hint then
+			UI.label(option.hint, { size = 12, color = p.dimText, wrap = true, rich = true }).Parent = text
+		end
+		text.Size = UDim2.fromScale(0, 0)
+		UI.flex().Parent = text
+		local row = UI.new("TextButton", {
+			AutoButtonColor = false,
+			Text = "",
+			BackgroundColor3 = p.accent,
+			BackgroundTransparency = if active then 0.9 else 1,
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			Active = not option.disabled,
+		}, { mark, text })
+		UI.hlist(10, Enum.VerticalAlignment.Top).Parent = row
+		UI.padding(8, 10, 8, 10).Parent = row
+		UI.corner(8).Parent = row
+		UI.stroke(if active then p.accent:Lerp(p.border, 0.4) else p.border).Parent = row
+		if not option.disabled then
+			row.Activated:Connect(function()
+				onChange(option.value)
+			end)
+		end
+		row.Parent = column
+	end
+	return column
 end
 
 return UI

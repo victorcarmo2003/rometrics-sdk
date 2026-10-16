@@ -25,6 +25,9 @@ export type Palette = {
 	danger: Color3,
 	info: Color3,
 	codeBackground: Color3,
+	card: Color3,
+	cardHover: Color3,
+	cardBorder: Color3,
 	isDark: boolean,
 }
 
@@ -35,8 +38,8 @@ Theme.FONT_BOLD = Font.fromEnum(Enum.Font.BuilderSansBold)
 Theme.FONT_CODE = Font.fromEnum(Enum.Font.RobotoMono)
 Theme.TEXT_SIZE = 14
 Theme.SMALL_SIZE = 12
-Theme.ROW_HEIGHT = 26
-Theme.RADIUS = 4
+Theme.ROW_HEIGHT = 28
+Theme.RADIUS = 6
 
 local function studioTheme(): any
 	local ok, theme = pcall(function()
@@ -92,6 +95,14 @@ function Theme.current(): Palette
 		danger = Color3.fromHex(if isDark then "#F0605D" else "#C4312E"),
 		info = accent,
 		codeBackground = color(theme, C.ScriptBackground, Color3.fromRGB(30, 30, 30)),
+		-- Cards sit a little above the background (lighter in dark mode, white in light mode).
+		card = if isDark then background:Lerp(Color3.new(1, 1, 1), 0.05) else Color3.new(1, 1, 1),
+		cardBorder = if isDark
+			then background:Lerp(Color3.new(1, 1, 1), 0.12)
+			else background:Lerp(Color3.new(0, 0, 0), 0.12),
+		cardHover = if isDark
+			then background:Lerp(Color3.new(1, 1, 1), 0.08)
+			else accent:Lerp(Color3.new(1, 1, 1), 0.94),
 		isDark = isDark,
 	}
 end

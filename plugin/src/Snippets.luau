@@ -94,13 +94,12 @@ Snippets.list = {} :: { Snippet }
 table.insert(Snippets.list, {
 	id = "setup",
 	title = "Setup (init + Secret)",
-	description = "Script de servidor: RoMetrics.init com a chave do Secrets Store e ProcessReceipt embrulhado.",
+	description = "Script de servidor: RoMetrics.init com a chave do Secrets Store (não define ProcessReceipt: veja wrapProcessReceipt).",
 	kind = nil,
 	scriptName = "RoMetricsSetup",
 	build = function(ctx: Context): Output
 		local header = withExtra(sdkHeader(ctx), {
 			'local HttpService = game:GetService("HttpService")',
-			'local MarketplaceService = game:GetService("MarketplaceService")',
 			'local RunService = game:GetService("RunService")',
 		})
 		local body = table.concat({
@@ -120,10 +119,10 @@ table.insert(Snippets.list, {
 			"\tenabledInStudio = true, -- false to stop sending while play-testing",
 			"})",
 			"",
-			"MarketplaceService.ProcessReceipt = RoMetrics.wrapProcessReceipt(function(receiptInfo)",
-			"\t-- Grant the developer product here; return NotProcessedYet if it could not be granted.",
-			"\treturn Enum.ProductPurchaseDecision.PurchaseGranted",
-			"end)",
+			"-- Developer products: MarketplaceService.ProcessReceipt has a single owner (the last script that",
+			"-- assigns it wins). Do not assign a second one here: wrap the callback your shop already assigns",
+			"-- with RoMetrics.wrapProcessReceipt, or call RoMetrics.trackReceipt(receiptInfo) in it right before",
+			'-- returning PurchaseGranted (snippet "wrapProcessReceipt"). Game passes are tracked automatically.',
 		}, "\n")
 		return { header = header, body = body }
 	end,
@@ -132,20 +131,28 @@ table.insert(Snippets.list, {
 table.insert(Snippets.list, {
 	id = "processReceipt",
 	title = "wrapProcessReceipt",
-	description = "Embrulha o ProcessReceipt existente: compras de dev products são rastreadas e o retorno é preservado.",
+	description = "Embrulha o ProcessReceipt que o jogo já define (só um por servidor): dev products rastreados, decisão preservada.",
 	kind = nil,
 	scriptName = "RoMetricsReceipts",
 	build = function(ctx: Context): Output
 		local header = withExtra(sdkHeader(ctx), { 'local MarketplaceService = game:GetService("MarketplaceService")' })
 		local body = table.concat({
+			"-- ProcessReceipt has a single owner: the last script that assigns it wins. Put the wrapper on the",
+			"-- assignment your game already has (e.g. its shop service) instead of adding a second one, or the",
+			"-- other assignment silently replaces this one and nothing is tracked.",
+			"-- Only PurchaseGranted is tracked; errors and nil become NotProcessedYet (Roblox retries).",
 			"MarketplaceService.ProcessReceipt = RoMetrics.wrapProcessReceipt(function(receiptInfo)",
 			'\tlocal player = game:GetService("Players"):GetPlayerByUserId(receiptInfo.PlayerId)',
 			"\tif not player then",
 			"\t\treturn Enum.ProductPurchaseDecision.NotProcessedYet",
 			"\tend",
-			"\t-- Grant receiptInfo.ProductId to the player here.",
+			"\t-- Grant receiptInfo.ProductId to the player here (and save it); return NotProcessedYet if that failed.",
 			"\treturn Enum.ProductPurchaseDecision.PurchaseGranted",
 			"end)",
+			"",
+			"-- Alternative, inside a ProcessReceipt you already own:",
+			"--   RoMetrics.trackReceipt(receiptInfo)",
+			"--   return Enum.ProductPurchaseDecision.PurchaseGranted",
 		}, "\n")
 		return { header = header, body = body }
 	end,

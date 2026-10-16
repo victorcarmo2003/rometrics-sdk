@@ -12,6 +12,14 @@
 		    priceRobux = CurrencySpent, name from a cached `GetProductInfo` lookup;
 		  * never yields extra time in the receipt path: tracking runs in `task.spawn`;
 		  * works before/without `init`: the handler still runs, purchases are simply not tracked.
+		`MarketplaceService.ProcessReceipt` is a callback with a single owner: the last script that assigns
+		it wins. Wrap the one callback your game already assigns (e.g. inside its shop service) instead of
+		assigning a second one, or call `trackReceipt(receiptInfo)` from that callback once it grants.
+
+	Override diagnostic
+		After `start`, a granted developer product prompt (`PromptProductPurchaseFinished`) that no wrapped
+		callback / `trackReceipt` saw within RECEIPT_GRACE_S logs one warning: another script owns
+		ProcessReceipt and purchases are not being tracked.
 
 	Game passes
 		Tracked automatically after `start` via `MarketplaceService.PromptGamePassPurchaseFinished`
@@ -39,11 +47,16 @@ export type Deps = {
 	players: any,
 	-- Seconds between GetProductInfo retries (0 in tests).
 	retryDelay: number?,
+	-- task.delay replacement (tests run the override check by hand).
+	delay: ((seconds: number, fn: () -> ()) -> ())?,
 }
 
 local PRODUCT_INFO_TTL_S = 600
 local PRODUCT_INFO_ATTEMPTS = 3
 local MAX_SEEN_RECEIPTS = 1000
+-- ProcessReceipt can run some seconds after the prompt closes (and games may yield on saves).
+local RECEIPT_GRACE_S = 30
+local MAX_RECEIPT_CALLS = 1000
 
 local Purchases = {}
 
@@ -57,6 +70,11 @@ type State = {
 	seenReceipts: { [string]: boolean },
 	seenOrder: { string },
 	connection: RBXScriptConnection?,
+	productConnection: RBXScriptConnection?,
+	-- "playerId:productId" -> os.clock() of the last receipt a wrapper / trackReceipt saw.
+	receiptCalls: { [string]: number },
+	receiptCallCount: number,
+	overrideWarned: boolean,
 }
 
 local state: State = {
@@ -67,6 +85,10 @@ local state: State = {
 	seenReceipts = {},
 	seenOrder = {},
 	connection = nil,
+	productConnection = nil,
+	receiptCalls = {},
+	receiptCallCount = 0,
+	overrideWarned = false,
 }
 
 local function getDeps(): Deps
@@ -226,11 +248,57 @@ local function onGamePassFinished(player: Player, gamePassId: number, wasPurchas
 	emit(player, "gamepass", gamePassId, info.name, toPrice(info.price), nil)
 end
 
+local function receiptKey(playerId: unknown, productId: unknown): string
+	return `{playerId}:{productId}`
+end
+
+-- Remembers that the SDK saw a receipt (feeds the override diagnostic). Never yields.
+local function noteReceipt(receiptInfo: { [string]: any })
+	if state.receiptCallCount >= MAX_RECEIPT_CALLS then
+		state.receiptCalls = {}
+		state.receiptCallCount = 0
+	end
+	local key = receiptKey(receiptInfo.PlayerId, receiptInfo.ProductId)
+	if state.receiptCalls[key] == nil then
+		state.receiptCallCount += 1
+	end
+	state.receiptCalls[key] = os.clock()
+end
+
+local function onProductFinished(userId: unknown, productId: unknown, isPurchased: unknown)
+	if isPurchased ~= true or state.overrideWarned then
+		return
+	end
+	local key = receiptKey(userId, productId)
+	local finishedAt = os.clock()
+	local deps = getDeps()
+	local delay = deps.delay or function(seconds: number, fn: () -> ())
+		task.delay(seconds, fn)
+	end
+	delay(RECEIPT_GRACE_S, function()
+		local seen = state.receiptCalls[key]
+		if state.overrideWarned or (seen ~= nil and seen >= finishedAt - RECEIPT_GRACE_S) then
+			return
+		end
+		state.overrideWarned = true
+		Log.warn(
+			`developer product {productId} was bought but no RoMetrics.wrapProcessReceipt callback saw the receipt: `
+				.. "another script assigns MarketplaceService.ProcessReceipt (only the last assignment wins). "
+				.. "Wrap that callback with RoMetrics.wrapProcessReceipt, or call RoMetrics.trackReceipt(receiptInfo) "
+				.. "where it grants. Purchases are not being tracked."
+		)
+	end)
+end
+
 function Purchases.start(_config: Types.Config, queue: Types.Queue, sessions: Types.SessionTracker)
 	state.queue = queue
 	state.sessions = sessions
 	if state.connection then
 		state.connection:Disconnect()
+	end
+	if state.productConnection then
+		state.productConnection:Disconnect()
+		state.productConnection = nil
 	end
 	local deps = getDeps()
 	state.connection = deps.marketplace.PromptGamePassPurchaseFinished:Connect(
@@ -243,26 +311,56 @@ function Purchases.start(_config: Types.Config, queue: Types.Queue, sessions: Ty
 			end
 		end
 	)
+	-- Diagnostic only (deprecated event, still fired on the server): optional so a missing event never breaks start.
+	local hooked, productSignal = pcall(function()
+		return deps.marketplace.PromptProductPurchaseFinished
+	end)
+	if hooked and productSignal ~= nil then
+		state.productConnection = productSignal:Connect(function(userId: number, productId: number, isPurchased: boolean)
+			local ok, err = pcall(onProductFinished, userId, productId, isPurchased)
+			if not ok then
+				Log.debug(`receipt override check failed: {err}`)
+			end
+		end)
+	end
+end
+
+-- Records a granted developer product receipt. For games whose ProcessReceipt lives in their own framework:
+-- call it from that callback right before returning PurchaseGranted. Never yields, never throws; duplicates
+-- (same PurchaseId) are tracked once.
+function Purchases.trackReceipt(receiptInfo: { [string]: any })
+	if type(receiptInfo) ~= "table" then
+		return
+	end
+	noteReceipt(receiptInfo)
+	task.spawn(function()
+		local tracked, err = pcall(function()
+			trackReceipt(receiptInfo)
+		end)
+		if not tracked then
+			Log.warn(`purchase tracking failed: {err}`)
+		end
+	end)
 end
 
 function Purchases.wrapProcessReceipt(
 	handler: (receiptInfo: { [string]: any }) -> Enum.ProductPurchaseDecision
 ): (receiptInfo: { [string]: any }) -> Enum.ProductPurchaseDecision
 	return function(receiptInfo: { [string]: any }): Enum.ProductPurchaseDecision
+		if type(receiptInfo) == "table" then
+			noteReceipt(receiptInfo)
+		end
 		local ok, decision = pcall(handler, receiptInfo)
 		if not ok then
 			Log.warn(`ProcessReceipt handler errored (returning NotProcessedYet): {decision}`)
 			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
-		if decision == Enum.ProductPurchaseDecision.PurchaseGranted and type(receiptInfo) == "table" then
-			task.spawn(function()
-				local tracked, err = pcall(function()
-					trackReceipt(receiptInfo)
-				end)
-				if not tracked then
-					Log.warn(`purchase tracking failed: {err}`)
-				end
-			end)
+		if decision == Enum.ProductPurchaseDecision.PurchaseGranted then
+			Purchases.trackReceipt(receiptInfo)
+		elseif decision ~= Enum.ProductPurchaseDecision.NotProcessedYet then
+			-- nil / anything else: Roblox treats it as not processed; say so instead of failing silently.
+			Log.warn(`ProcessReceipt handler returned {decision} (expected an Enum.ProductPurchaseDecision): NotProcessedYet`)
+			return Enum.ProductPurchaseDecision.NotProcessedYet
 		end
 		return decision
 	end
@@ -277,6 +375,9 @@ function Purchases._reset()
 	if state.connection then
 		state.connection:Disconnect()
 	end
+	if state.productConnection then
+		state.productConnection:Disconnect()
+	end
 	state.queue = nil
 	state.sessions = nil
 	state.deps = nil
@@ -284,6 +385,10 @@ function Purchases._reset()
 	state.seenReceipts = {}
 	state.seenOrder = {}
 	state.connection = nil
+	state.productConnection = nil
+	state.receiptCalls = {}
+	state.receiptCallCount = 0
+	state.overrideWarned = false
 end
 
 return Purchases

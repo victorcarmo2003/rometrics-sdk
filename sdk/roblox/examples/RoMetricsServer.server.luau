@@ -35,6 +35,8 @@ RoMetrics.init({
 
 -- 2. Developer products: wrap your ProcessReceipt. The decision you return is preserved;
 -- if your handler errors, RoMetrics returns NotProcessedYet so Roblox retries later.
+-- ProcessReceipt has a single owner (the last assignment wins): if your game already assigns it
+-- elsewhere (a shop service), wrap that assignment instead, or call RoMetrics.trackReceipt there.
 local COINS_PRODUCT_ID = 1234567
 local coins: { [number]: number } = {}
 

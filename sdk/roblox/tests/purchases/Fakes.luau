@@ -128,6 +128,7 @@ end
 function Fakes.marketplace(products: { [number]: any }, failures: number?): any
 	local mp = {
 		PromptGamePassPurchaseFinished = Fakes.signal(),
+		PromptProductPurchaseFinished = Fakes.signal(),
 		calls = 0,
 		failuresLeft = failures or 0,
 	}

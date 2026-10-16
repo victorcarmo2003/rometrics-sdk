@@ -84,7 +84,7 @@ end
 
 local View = {
 	id = "track",
-	title = "Rastrear",
+	title = "Marcar objeto (sem código)",
 	watches = { selection = true, tags = true },
 }
 

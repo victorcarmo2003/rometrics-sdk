@@ -2,28 +2,30 @@
 -- RoMetrics Studio plugin entry: toolbar button + dock widget.
 local RunService = game:GetService("RunService")
 
--- Plugins also load inside play-test servers/clients; only the edit session needs the UI.
+-- Plugins may also load inside play-test servers/clients; only the edit session needs the UI.
 if RunService:IsRunning() then
 	return
 end
 
 local App = require(script.App)
 
+-- Tab bar order (views without `nav` open from inside other screens).
 local views = {
 	require(script.Views.Home),
+	require(script.Views.Measure),
+	require(script.Views.Sales),
 	require(script.Views.Events),
+	require(script.Views.Config),
 	require(script.Views.Track),
-	require(script.Views.Snippets),
 	require(script.Views.Flows),
 	require(script.Views.Validate),
-	require(script.Views.Config),
 } :: { any }
 
 local toolbar = plugin:CreateToolbar("RoMetrics")
-local button = toolbar:CreateButton("RoMetrics", "Instalar o SDK, criar eventos e conferir o envio", "")
+local button = toolbar:CreateButton("RoMetrics", "Medir vendas, moedas e ações do seu jogo", "")
 button.ClickableWhenViewportHidden = true
 
-local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, false, 760, 640, 460, 380)
+local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, false, 520, 680, 380, 420)
 local okAsync, asyncWidget = pcall(function()
 	return (plugin :: any):CreateDockWidgetPluginGuiAsync("RoMetricsWidget", widgetInfo)
 end)

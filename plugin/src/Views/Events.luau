@@ -42,6 +42,7 @@ end
 local View = {
 	id = "events",
 	title = "Eventos",
+	nav = true,
 	watches = { tags = true },
 }
 
@@ -358,7 +359,7 @@ function View.render(app: any, container: Frame)
 				prefix = { UI.badge("FLOW", Theme.kindColor("funnel")) },
 				onClick = function()
 					app.state.flows = { selected = ref.funnel }
-					app:setTab("flows")
+					app:setTab("flows", "events")
 				end,
 			}).Parent =
 				body
@@ -534,7 +535,7 @@ function View.render(app: any, container: Frame)
 			UI.button("Editar na aba Fluxos", {
 				onClick = function()
 					app.state.flows = { selected = current.name }
-					app:setTab("flows")
+					app:setTab("flows", "events")
 				end,
 			}).Parent =
 				flow
@@ -568,11 +569,15 @@ function View.render(app: any, container: Frame)
 			)
 			table.insert(
 				actions,
-				UI.button("Snippet", {
+				UI.button("Colocar no código", {
 					onClick = function()
-						app.state.snippets =
-							{ event = name, id = if current.kind == "custom" then "custom" else current.kind }
-						app:setTab("snippets")
+						app.state.measure = { mode = current.kind, event = name }
+						if current.kind == "economy" then
+							app.state.measure.form = { currency = name }
+						elseif current.kind == "progression" then
+							app.state.measure.form = { path = name }
+						end
+						app:setTab("measure")
 					end,
 				})
 			)
