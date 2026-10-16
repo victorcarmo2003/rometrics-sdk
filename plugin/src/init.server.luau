@@ -26,6 +26,8 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, fals
 local okAsync, asyncWidget = pcall(function()
 	return (plugin :: any):CreateDockWidgetPluginGuiAsync("RoMetricsWidget", widgetInfo)
 end)
+-- Fallback for Studio builds without the Async variant.
+-- selene: allow(deprecated)
 local widget: DockWidgetPluginGui = if okAsync and asyncWidget
 	then asyncWidget
 	else plugin:CreateDockWidgetPluginGui("RoMetricsWidget", widgetInfo)

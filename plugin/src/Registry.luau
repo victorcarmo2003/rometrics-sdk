@@ -265,14 +265,181 @@ end
 
 -- Engine IO ---------------------------------------------------------------------------------------
 
--- Reads a registry ModuleScript. `require` caches by instance, so a fresh clone is required each time.
-function Registry.read(module: ModuleScript): (Registry, { string })
-	local clone = module:Clone()
-	local ok, value = pcall(require, clone)
-	clone:Destroy()
+-- Safe data parser ----------------------------------------------------------------------------------
+-- The registry lives in the place, which may come from an untrusted source (downloaded place or
+-- model). It must NEVER be `require`d from the plugin (that would run its code with plugin
+-- permissions). This parses only the literal subset `serialize` emits:
+--   `return { key = "str" | number | true | false | nil | { ... }, ... }` plus comments.
+
+local MAX_DEPTH = 8
+local MAX_SOURCE = 1_000_000
+
+local ESCAPES: { [string]: string } = { n = "\n", t = "\t", r = "\r", ['"'] = '"', ["\\"] = "\\", ["'"] = "'" }
+
+-- Returns (value, nil) or (nil, reason). Pure; unit tested.
+function Registry.parse(source: string): (unknown, string?)
+	if #source > MAX_SOURCE then
+		return nil, "source muito grande"
+	end
+	local pos = 1
+	local len = #source
+
+	local function skip()
+		while pos <= len do
+			local c = string.sub(source, pos, pos)
+			if string.find(c, "^%s$") then
+				pos += 1
+			elseif string.sub(source, pos, pos + 1) == "--" then
+				local nl = string.find(source, "\n", pos, true)
+				pos = if nl then nl + 1 else len + 1
+			else
+				break
+			end
+		end
+	end
+
+	local parseValue: (depth: number) -> unknown
+
+	local function parseString(): string
+		local quoteChar = string.sub(source, pos, pos)
+		pos += 1
+		local out = {}
+		while true do
+			if pos > len then
+				error("string não terminada", 0)
+			end
+			local c = string.sub(source, pos, pos)
+			if c == quoteChar then
+				pos += 1
+				return table.concat(out)
+			elseif c == "\\" then
+				local nextChar = string.sub(source, pos + 1, pos + 1)
+				local digits = string.match(source, "^%d%d?%d?", pos + 1)
+				if digits then
+					local code = tonumber(digits) :: number
+					if code > 255 then
+						error("escape inválido", 0)
+					end
+					table.insert(out, string.char(code))
+					pos += 1 + #digits
+				elseif ESCAPES[nextChar] then
+					table.insert(out, ESCAPES[nextChar] :: string)
+					pos += 2
+				else
+					error("escape não suportado", 0)
+				end
+			elseif c == "\n" then
+				error("string com quebra de linha", 0)
+			else
+				table.insert(out, c)
+				pos += 1
+			end
+		end
+	end
+
+	local function parseTable(depth: number): { [unknown]: unknown }
+		if depth > MAX_DEPTH then
+			error("aninhamento excessivo", 0)
+		end
+		pos += 1 -- {
+		local out: { [unknown]: unknown } = {}
+		local arrayIndex = 1
+		while true do
+			skip()
+			local c = string.sub(source, pos, pos)
+			if c == "" then
+				error("tabela não terminada", 0)
+			elseif c == "}" then
+				pos += 1
+				return out
+			end
+			local ident = string.match(source, "^[%a_][%w_]*", pos)
+			local afterIdent = if ident then pos + #ident else pos
+			local key: unknown = nil
+			if ident then
+				local save = pos
+				pos = afterIdent
+				skip()
+				if string.sub(source, pos, pos) == "=" and string.sub(source, pos + 1, pos + 1) ~= "=" then
+					pos += 1
+					key = ident
+				else
+					pos = save
+				end
+			end
+			local value = parseValue(depth + 1)
+			if key == nil then
+				key = arrayIndex
+				arrayIndex += 1
+			end
+			out[key] = value
+			skip()
+			local sep = string.sub(source, pos, pos)
+			if sep == "," or sep == ";" then
+				pos += 1
+			elseif sep ~= "}" then
+				error("esperado ',' ou '}'", 0)
+			end
+		end
+	end
+
+	parseValue = function(depth: number): unknown
+		skip()
+		local c = string.sub(source, pos, pos)
+		if c == "{" then
+			return parseTable(depth)
+		elseif c == '"' or c == "'" then
+			return parseString()
+		end
+		local number = string.match(source, "^%-?%d+%.?%d*", pos)
+		if number then
+			pos += #number
+			return tonumber(number)
+		end
+		local word = string.match(source, "^[%a_][%w_]*", pos)
+		if word == "true" or word == "false" or word == "nil" then
+			pos += #word
+			return if word == "true" then true elseif word == "false" then false else nil
+		end
+		error(`expressão não suportada na posição {pos}`, 0)
+	end
+
+	local ok, result = pcall(function()
+		skip()
+		if string.sub(source, pos, pos + 5) ~= "return" then
+			error("esperado 'return'", 0)
+		end
+		pos += 6
+		local value = parseValue(1)
+		skip()
+		if pos <= len then
+			error("conteúdo inesperado após o retorno", 0)
+		end
+		return value
+	end)
 	if not ok then
-		local registry = Registry.empty()
-		return registry, { `erro ao carregar {module:GetFullName()}: {value}` }
+		return nil, tostring(result)
+	end
+	return result, nil
+end
+
+-- Reads a registry ModuleScript WITHOUT executing it (see Registry.parse).
+function Registry.read(module: ModuleScript): (Registry, { string })
+	local okSource, source = pcall(function()
+		return game:GetService("ScriptEditorService"):GetEditorSource(module)
+	end)
+	if not okSource or type(source) ~= "string" then
+		local okRaw, raw = pcall(function()
+			return (module :: any).Source
+		end)
+		source = if okRaw and type(raw) == "string" then raw else nil
+	end
+	if type(source) ~= "string" then
+		return Registry.empty(), { `não foi possível ler {module:GetFullName()}` }
+	end
+	local value, err = Registry.parse(source)
+	if err then
+		return Registry.empty(), { `erro ao ler {module:GetFullName()}: {err} (o módulo não é executado pelo plugin)` }
 	end
 	return Registry.normalize(value)
 end

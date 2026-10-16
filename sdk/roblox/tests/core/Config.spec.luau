@@ -35,6 +35,16 @@ return function()
 			)
 		end)
 
+		it("rejects cleartext http for non-loopback hosts and embedded credentials", function()
+			local default = "https://ingest.rometrics.app"
+			expect(Config.resolve({ key = "k", endpoint = "http://ingest.example.com" }, "1").endpoint).to.equal(default)
+			expect(Config.resolve({ key = "k", endpoint = "http://localhost.evil.com" }, "1").endpoint).to.equal(default)
+			expect(Config.resolve({ key = "k", endpoint = "https://u:p@ingest.example.com" }, "1").endpoint).to.equal(default)
+			expect(Config.resolve({ key = "k", endpoint = "https://ingest.example.com/" }, "1").endpoint).to.equal(
+				"https://ingest.example.com"
+			)
+		end)
+
 		it("falls back to defaults for invalid values", function()
 			local config = Config.resolve({
 				key = "k",

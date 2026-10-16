@@ -196,7 +196,7 @@ local function trackReceipt(receiptInfo: { [string]: any })
 		return
 	end
 	local receiptId = truncate(if receiptInfo.PurchaseId ~= nil then tostring(receiptInfo.PurchaseId) else nil, 100)
-	if receiptId and not markReceipt(receiptId) then
+	if receiptId and state.seenReceipts[receiptId] then
 		Log.debug(`purchase receipt {receiptId} already tracked`)
 		return
 	end
@@ -209,6 +209,12 @@ local function trackReceipt(receiptInfo: { [string]: any })
 	local info = getProductInfo(productId, Enum.InfoType.Product)
 	-- CurrencySpent is what the player actually paid (sales/discounts included).
 	local price = if receiptInfo.CurrencySpent ~= nil then toPrice(receiptInfo.CurrencySpent) else toPrice(info.price)
+	-- Mark only after the (yielding) lookup, right before emitting, so concurrent duplicates dedupe
+	-- and a failure above does not swallow a later retry of the same receipt.
+	if receiptId and not markReceipt(receiptId) then
+		Log.debug(`purchase receipt {receiptId} already tracked`)
+		return
+	end
 	emit(player, "devproduct", productId, info.name, price, receiptId)
 end
 
