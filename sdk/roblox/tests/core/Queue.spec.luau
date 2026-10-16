@@ -193,6 +193,60 @@ return function()
 		end)
 	end)
 
+	describe("failure warnings", function()
+		local Log = require(ReplicatedStorage.RoMetrics.Util.Log) :: any
+		local original = Log.warn
+		local warnings: { string } = {}
+		beforeEach(function()
+			table.clear(warnings)
+			Log.warn = function(message: string)
+				table.insert(warnings, message)
+			end
+		end)
+		afterEach(function()
+			Log.warn = original
+		end)
+
+		it("warns with the reason on the first failure, even without debug", function()
+			local queue, transport, clock = setup({ maxBatchSize = 1 }, "retry")
+			transport.lastError = "ConnectFail to https://ingest.rometrics.app (pass 'endpoint')"
+			queue:push(Fakes.event())
+			expect(#warnings).to.equal(1)
+			expect(string.find(warnings[1], "send failed: ConnectFail to https://ingest.rometrics.app", 1, true) ~= nil).to.equal(
+				true
+			)
+
+			-- Failures 2..4 stay quiet; the breaker opening warns again with the reason.
+			for _ = 2, Queue.BREAKER_THRESHOLD do
+				clock.advance(Queue.BACKOFF_MAX_S + 1)
+				queue:flush()
+			end
+			expect(#warnings).to.equal(2)
+			expect(string.find(warnings[2], "5 consecutive send failures (ConnectFail", 1, true) ~= nil).to.equal(true)
+			expect(string.find(warnings[2], "pausing for 60s", 1, true) ~= nil).to.equal(true)
+		end)
+
+		it("warns again on the first failure after a success", function()
+			local queue, transport, clock = setup({ maxBatchSize = 1 })
+			table.insert(transport.script, "retry")
+			table.insert(transport.script, "ok")
+			table.insert(transport.script, "retry")
+			queue:push(Fakes.event())
+			clock.advance(Queue.BACKOFF_MAX_S + 1)
+			queue:flush()
+			queue:push(Fakes.event())
+			expect(#warnings).to.equal(2)
+		end)
+
+		it("uses the transport error when send throws", function()
+			local queue, transport = setup({ maxBatchSize = 1 })
+			transport.throws = true
+			queue:push(Fakes.event())
+			expect(#warnings).to.equal(1)
+			expect(string.find(warnings[1], "transport error", 1, true) ~= nil).to.equal(true)
+		end)
+	end)
+
 	describe("drop and fatal", function()
 		it("discards a batch the server rejects and keeps going", function()
 			local queue, transport = setup({ maxBatchSize = 2 })

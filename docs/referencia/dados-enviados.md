@@ -8,7 +8,7 @@ Nenhum dado pessoal além do UserId do Roblox é coletado: sem nome, sem chat, s
 
 ```json
 {
-  "sdk": { "name": "rometrics-luau", "version": "0.3.0" },
+  "sdk": { "name": "rometrics-luau", "version": "0.3.1" },
   "server": { "universeId": 123, "placeId": 456, "placeVersion": 78, "jobId": "…", "private": false, "startedAt": 1760000000000 },
   "sentAt": 1760000012345,
   "events": [ … ]

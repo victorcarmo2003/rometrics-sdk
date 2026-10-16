@@ -1,6 +1,6 @@
 [package]
 name = "victorcarmo2003/rometrics"
-version = "0.3.0"
+version = "0.3.1"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 license = "MIT"

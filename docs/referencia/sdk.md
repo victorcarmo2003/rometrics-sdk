@@ -156,7 +156,7 @@ Agenda o envio imediato do que está na fila (assíncrono). Normalmente desneces
 
 ### `RoMetrics.VERSION: string`
 
-Versão do SDK, ex. `"0.3.0"`. Também enviada em todo lote.
+Versão do SDK, ex. `"0.3.1"`. Também enviada em todo lote.
 
 ---
 

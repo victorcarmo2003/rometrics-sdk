@@ -125,6 +125,35 @@ return function()
 			expect(transport.retryAfter).to.equal(nil)
 		end)
 
+		it("records the failure reason and endpoint, never the key", function()
+			local transport = setup(nil, true)
+			transport:send({ Fakes.event() })
+			local reason = transport.lastError :: string
+			expect(reason).to.equal("ConnectFail to http://localhost:4100 (check the 'endpoint' option)")
+			expect(string.find(reason, "rmk_live_test", 1, true)).to.equal(nil)
+		end)
+
+		it("records the HTTP status on a retryable response", function()
+			local transport = setup({ Success = false, StatusCode = 503 })
+			transport:send({ Fakes.event() })
+			expect(transport.lastError).to.equal("HTTP 503 from http://localhost:4100")
+		end)
+
+		it("redacts the key if a request error echoes it", function()
+			local transport = Transport.new(Fakes.config(), {
+				request = function(_req: any): any
+					error("weird failure rmk_live_test")
+				end,
+				serverInfo = function()
+					return serverInfo
+				end,
+			})
+			transport:send({ Fakes.event() })
+			local reason = transport.lastError :: string
+			expect(string.find(reason, "rmk_live_test", 1, true)).to.equal(nil)
+			expect(string.find(reason, "<key>", 1, true) ~= nil).to.equal(true)
+		end)
+
 		it("splits bodies over MAX_BODY_BYTES into smaller requests", function()
 			local transport, requests = setup()
 			local events = {}
@@ -158,6 +187,30 @@ return function()
 				true
 			)
 			expect(Transport.isHttpDisabledError("HttpError: ConnectFail")).to.equal(false)
+		end)
+
+		it("extracts a short reason from request errors", function()
+			expect(Transport.failureReason("HttpError: ConnectFail")).to.equal("ConnectFail")
+			expect(Transport.failureReason("HttpError: DnsResolve")).to.equal("DnsResolve")
+			expect(Transport.failureReason("  something odd  ")).to.equal("something odd")
+			expect(Transport.failureReason("")).to.equal("unknown error")
+		end)
+
+		it("tells users of the default endpoint to pass 'endpoint'", function()
+			local msg = Transport.failureMessage("ConnectFail", "https://ingest.rometrics.app")
+			expect(string.find(msg, "ConnectFail to https://ingest.rometrics.app", 1, true) ~= nil).to.equal(true)
+			expect(string.find(msg, "pass 'endpoint' in RoMetrics.init", 1, true) ~= nil).to.equal(true)
+			local dns = Transport.failureMessage("DnsResolve", "https://ingest.rometrics.app")
+			expect(string.find(dns, "pass 'endpoint'", 1, true) ~= nil).to.equal(true)
+		end)
+
+		it("points custom endpoints at the option and leaves HTTP errors plain", function()
+			expect(Transport.failureMessage("ConnectFail", "https://example.test")).to.equal(
+				"ConnectFail to https://example.test (check the 'endpoint' option)"
+			)
+			expect(Transport.failureMessage("HTTP 503", "https://ingest.rometrics.app")).to.equal(
+				"HTTP 503 from https://ingest.rometrics.app"
+			)
 		end)
 
 		it("explains universe mismatches", function()

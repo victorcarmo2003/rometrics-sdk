@@ -6,6 +6,7 @@
 -- - Batches go out spaced by MIN_SEND_INTERVAL to stay under the ingest per-job limit (30 req/min).
 -- - "retry": the batch goes back to the front; exponential backoff 2..60 s with jitter, honouring
 --   retry-after. BREAKER_THRESHOLD consecutive failures open the breaker for BREAKER_OPEN_S.
+--   The first failure of a streak and each breaker opening warn with the transport's `lastError`.
 --   Retries happen on the next periodic tick after the backoff expires.
 -- - "drop": batch discarded (counted in `dropped`). "fatal": queue disabled until restart.
 -- - flushSync(timeout) is used by BindToClose: blocks, ignores the breaker, bigger batches.
@@ -123,9 +124,6 @@ function Queue.new(config: Types.Config, transport: Types.Transport, deps: Deps?
 		lastSendAt = now()
 		local ok, result = pcall(transport.send, transport, batch)
 		local status: Status = if ok then (result :: any) :: Status else "retry"
-		if not ok then
-			Log.warn(`transport error: {result}`)
-		end
 
 		if status == "ok" then
 			sent += #batch
@@ -145,9 +143,17 @@ function Queue.new(config: Types.Config, transport: Types.Transport, deps: Deps?
 			local hint = if typeof(retryAfter) == "number" then retryAfter else nil
 			local delay = Queue.backoffDelay(failures, random(), hint)
 			nextAttemptAt = now() + delay
+			local lastError = (transport :: any).lastError
+			local reason = if not ok
+				then `transport error: {result}`
+				elseif typeof(lastError) == "string" then lastError
+				else "unknown error"
 			if failures >= Queue.BREAKER_THRESHOLD then
 				breakerUntil = now() + Queue.BREAKER_OPEN_S
-				Log.warn(`{failures} consecutive send failures; pausing for {Queue.BREAKER_OPEN_S}s`)
+				Log.warn(`{failures} consecutive send failures ({reason}); pausing for {Queue.BREAKER_OPEN_S}s`)
+			elseif failures == 1 then
+				-- Always visible (not only with debug): a wrong endpoint would otherwise fail silently.
+				Log.warn(`send failed: {reason}; retrying in {string.format("%.1f", delay)}s`)
 			else
 				Log.debug(`send failed ({failures}); retrying in {string.format("%.1f", delay)}s`)
 			end

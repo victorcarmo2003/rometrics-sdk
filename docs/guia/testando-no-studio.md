@@ -33,7 +33,7 @@ RoMetrics.init({
 })
 ```
 
-Aperte **Play**. O Output mostra `[RoMetrics] initialized v0.3.0` e, com `debug`, `sent N events (202)` a cada ~10 s. Abra o dashboard em **Ao vivo** e **Eventos**.
+Aperte **Play**. O Output mostra `[RoMetrics] initialized v0.3.1` e, com `debug`, `sent N events (202)` a cada ~10 s. Abra o dashboard em **Ao vivo** e **Eventos**.
 
 Quando você para o Play, o SDK envia `player_leave` e `server_stop` antes de fechar (até 25 s).
 

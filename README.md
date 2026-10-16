@@ -47,7 +47,7 @@ Passo a passo completo: [Começando](https://victorcarmo2003.github.io/rometrics
 | [`RoMetrics.rbxm`](https://github.com/victorcarmo2003/rometrics-sdk/releases/latest/download/RoMetrics.rbxm) | SDK (ModuleScript). Insira em `ReplicatedStorage` |
 | [`RoMetricsPlugin.rbxm`](https://github.com/victorcarmo2003/rometrics-sdk/releases/latest/download/RoMetricsPlugin.rbxm) | Plugin do Studio. Copie para a pasta de Plugins |
 
-Também via Wally: `RoMetrics = "victorcarmo2003/rometrics@0.3.0"`.
+Também via Wally: `RoMetrics = "victorcarmo2003/rometrics@0.3.1"`.
 
 ## Usando com IA
 

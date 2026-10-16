@@ -5,10 +5,12 @@
 --   2xx                  -> "ok"
 --   400, 413, other 4xx  -> "drop"   (bad batch; retrying would fail again)
 --   401, 403             -> "fatal"  (invalid/revoked key or wrong universe)
---   408, 429, 5xx, error -> "retry"  (`retryAfter` holds the server hint in seconds, if any)
+--   408, 429, 5xx, error -> "retry"  (`retryAfter` holds the server hint in seconds, if any;
+--                                     `lastError` a short reason with the endpoint, never the key)
 local HttpService = game:GetService("HttpService")
 
 local Types = require(script.Parent.Types)
+local Config = require(script.Parent.Config)
 local Server = require(script.Parent.Server)
 local Clock = require(script.Parent.Util.Clock)
 local Log = require(script.Parent.Util.Log)
@@ -38,8 +40,8 @@ export type Deps = {
 	now: (() -> number)?,
 }
 
--- Types.Transport plus the last retry-after hint, read by Queue after a "retry".
-export type HttpTransport = Types.Transport & { retryAfter: number? }
+-- Types.Transport plus the last retry-after hint and failure reason, read by Queue after a "retry".
+export type HttpTransport = Types.Transport & { retryAfter: number?, lastError: string? }
 
 local Transport = {}
 
@@ -73,6 +75,52 @@ function Transport.fatalMessage(statusCode: number, body: string?, universeId: n
 		reason = `forbidden: {text}`
 	end
 	return `server refused the key ({statusCode}): {reason}. RoMetrics disabled until restart`
+end
+
+-- Short reason from a RequestAsync error ("HttpError: ConnectFail" -> "ConnectFail"). Pure; unit tested.
+function Transport.failureReason(message: string): string
+	local code = string.match(message, "HttpError:%s*(%w+)")
+	if code then
+		return code
+	end
+	local trimmed = string.gsub(message, "^%s+", "")
+	trimmed = string.gsub(trimmed, "%s+$", "")
+	if #trimmed > 120 then
+		trimmed = string.sub(trimmed, 1, 117) .. "..."
+	end
+	return if trimmed == "" then "unknown error" else trimmed
+end
+
+-- True for errors where the host was never reached (bad/unknown endpoint, DNS, TLS, timeout).
+function Transport.isConnectionError(reason: string): boolean
+	local lower = string.lower(reason)
+	for _, needle in { "connect", "dns", "ssl", "timedout", "timed out", "netfail", "invalidurl" } do
+		if string.find(lower, needle, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Warning text for a failed send: reason, endpoint and what to check. Pure; unit tested.
+function Transport.failureMessage(reason: string, endpoint: string): string
+	if not Transport.isConnectionError(reason) then
+		return `{reason} from {endpoint}`
+	end
+	if endpoint == Config.DEFAULTS.endpoint then
+		return `{reason} to {endpoint} (default endpoint not reachable: pass 'endpoint' in RoMetrics.init`
+			.. " with your ingest URL)"
+	end
+	return `{reason} to {endpoint} (check the 'endpoint' option)`
+end
+
+-- Removes the key from text that may be logged (defensive; errors shouldn't echo headers).
+local function redactKey(text: string, key: string | Secret): string
+	if typeof(key) ~= "string" or #(key :: string) < 4 then
+		return text
+	end
+	local escaped = string.gsub(key :: string, "[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")
+	return (string.gsub(text, escaped, "<key>"))
 end
 
 local function defaultRequest(req: HttpRequest): HttpResponse
@@ -118,6 +166,7 @@ function Transport.new(config: Types.Config, deps: Deps?): HttpTransport
 
 	local transport = {
 		retryAfter = nil :: number?,
+		lastError = nil :: string?,
 	}
 
 	local warnedHttpDisabled = false
@@ -167,8 +216,9 @@ function Transport.new(config: Types.Config, deps: Deps?): HttpTransport
 				else Enum.HttpCompression.None,
 		})
 		if not reqOk then
-			local message = tostring(res)
+			local message = redactKey(tostring(res), config.key)
 			if Transport.isHttpDisabledError(message) then
+				transport.lastError = "HTTP requests are disabled"
 				if not warnedHttpDisabled then
 					warnedHttpDisabled = true
 					Log.warn(
@@ -176,6 +226,7 @@ function Transport.new(config: Types.Config, deps: Deps?): HttpTransport
 					)
 				end
 			else
+				transport.lastError = Transport.failureMessage(Transport.failureReason(message), config.endpoint)
 				Log.debug(`request failed: {message}`)
 			end
 			return "retry"
@@ -187,6 +238,7 @@ function Transport.new(config: Types.Config, deps: Deps?): HttpTransport
 			Log.debug(`sent {#events} events ({response.StatusCode})`)
 		elseif status == "retry" then
 			transport.retryAfter = Transport.parseRetryAfter(response.Headers)
+			transport.lastError = Transport.failureMessage(`HTTP {response.StatusCode}`, config.endpoint)
 			Log.debug(`server returned {response.StatusCode}; will retry`)
 		elseif status == "drop" then
 			Log.warn(`server rejected batch of {#events} ({response.StatusCode}): {response.Body or ""}`)
@@ -198,6 +250,7 @@ function Transport.new(config: Types.Config, deps: Deps?): HttpTransport
 
 	function transport.send(_self: any, events: { Types.Event }): Status
 		transport.retryAfter = nil
+		transport.lastError = nil
 
 		-- JSONEncode turns an empty table into `[]`, which the ingest schema rejects for `data`.
 		for _, event in events do

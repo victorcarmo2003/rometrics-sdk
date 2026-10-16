@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+**SDK**
+- Falha de envio agora aparece no Output mesmo sem `debug`: na primeira falha da sequência (`send failed: <motivo> ...`) e quando o SDK pausa os envios (`5 consecutive send failures (<motivo>); pausing for 60s`). A mensagem traz o motivo (ex.: `ConnectFail`, `HTTP 503`) e o endpoint em uso, nunca a chave.
+- Erro de conexão no endpoint padrão diz explicitamente para passar `endpoint` no `RoMetrics.init`.
+- Também no Wally: `victorcarmo2003/rometrics@0.3.1`.
+
 ## 0.3.0
 
 **SDK**

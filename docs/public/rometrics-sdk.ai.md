@@ -1,10 +1,10 @@
 # RoMetrics SDK for Roblox — reference for AI assistants
 
-> You are helping a Roblox developer integrate the RoMetrics SDK (real-time analytics: players, sales, custom events). This file is the complete, authoritative API. Do not invent functions, options or events that are not listed here. Answer the user in their own language (often Portuguese). Version: 0.3.0. Human docs: https://victorcarmo2003.github.io/rometrics-sdk/ · Source: https://github.com/victorcarmo2003/rometrics-sdk
+> You are helping a Roblox developer integrate the RoMetrics SDK (real-time analytics: players, sales, custom events). This file is the complete, authoritative API. Do not invent functions, options or events that are not listed here. Answer the user in their own language (often Portuguese). Version: 0.3.1. Human docs: https://victorcarmo2003.github.io/rometrics-sdk/ · Source: https://github.com/victorcarmo2003/rometrics-sdk
 
 ## 1. Mental model
 
-- One ModuleScript named `RoMetrics` (usually in `ReplicatedStorage`; with Wally: `RoMetrics = "victorcarmo2003/rometrics@0.3.0"`, required as `ReplicatedStorage.Packages.RoMetrics`). **Server-only**: require and call it from Scripts in `ServerScriptService`, never from LocalScripts.
+- One ModuleScript named `RoMetrics` (usually in `ReplicatedStorage`; with Wally: `RoMetrics = "victorcarmo2003/rometrics@0.3.1"`, required as `ReplicatedStorage.Packages.RoMetrics`). **Server-only**: require and call it from Scripts in `ServerScriptService`, never from LocalScripts.
 - Call `RoMetrics.init({...})` once at server start. After that, a lot is tracked automatically (servers/CCU, player join/leave, country, Premium, join source, Game Pass purchases, player platform, tagged instances).
 - The event API mirrors Roblox `AnalyticsService` exactly (same method names and argument order), called with `:`.
 - **No call ever throws** into game code. Invalid input is dropped with a `warn` in Output. Do not wrap SDK calls in `pcall`; it is unnecessary.
@@ -70,7 +70,7 @@ Never put a production key in source code. Never suggest reading the key on the 
 | `RoMetrics:LogProgressionEvent` | method | `(player: Player, progressionPathName: string, status: Enum.AnalyticsProgressionType, level: number, levelName: string?, customFields: {[string]: any}?)` |
 | `RoMetrics:track` | method | `(eventName: string, opts: { player: Player?, value: number?, props: {[string]: any}? }?)` — custom event with or without a player |
 | `RoMetrics:flush` | method | `()` — schedule an immediate async send (rarely needed) |
-| `RoMetrics.VERSION` | string | `"0.3.0"` |
+| `RoMetrics.VERSION` | string | `"0.3.1"` |
 
 There are no other public members. In particular there is no `RoMetrics.Track`, `RoMetrics:Log`, `RoMetrics:identify`, `RoMetrics:setUserProperty`, `RoMetrics:shutdown`, or client-side API.
 
@@ -177,7 +177,10 @@ Batches every `flushInterval` s or when full; gzip ≥ 1 KB; ≤ 1 MB per reques
 | `server refused the key (403): this key belongs to another game` | create the key for this Universe ID |
 | `Universe ID 0 … publish the place first` | publish the place |
 | `server returned 429; will retry` | normal, automatic |
-| `request failed: ConnectFail` | wrong `endpoint` or ingest down |
+| `send failed: ConnectFail to https://ingest.rometrics.app (default endpoint not reachable: pass 'endpoint' ...)` | pass `endpoint` (your ingest URL) in `RoMetrics.init` |
+| `send failed: ConnectFail` / `DnsResolve` / `TimedOut to <endpoint> (check the 'endpoint' option)` | wrong `endpoint` or ingest down |
+| `send failed: HTTP 5xx from <endpoint>` | ingest temporarily failing; retried automatically |
+| `5 consecutive send failures (<reason>); pausing for 60s` | fix the reason in parentheses (rows above) |
 
 ## 12. Recipes
 

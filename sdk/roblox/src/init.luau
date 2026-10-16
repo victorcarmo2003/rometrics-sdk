@@ -25,7 +25,7 @@ local Log = require(script.Util.Log)
 export type Options = Types.Options
 
 local RoMetrics = {}
-RoMetrics.VERSION = "0.3.0"
+RoMetrics.VERSION = "0.3.1"
 
 type State = {
 	config: Types.Config,
