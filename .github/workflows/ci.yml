@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  LUNE_VERSION: 0.10.5
+  SELENE_VERSION: 0.31.0
+
+jobs:
+  luau:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lune and Selene
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o lune.zip "https://github.com/lune-org/lune/releases/download/v${LUNE_VERSION}/lune-${LUNE_VERSION}-linux-x86_64.zip"
+          curl -fsSL -o selene.zip "https://github.com/Kampfkarren/selene/releases/download/${SELENE_VERSION}/selene-${SELENE_VERSION}-linux.zip"
+          unzip -o lune.zip -d "$HOME/bin" && unzip -o selene.zip -d "$HOME/bin"
+          chmod +x "$HOME/bin/lune" "$HOME/bin/selene"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: SDK tests
+        working-directory: sdk/roblox
+        run: lune run tests/run.luau
+      - name: Plugin tests
+        run: lune run plugin/tools/run-tests.luau
+      - name: Lint SDK
+        working-directory: sdk/roblox
+        run: selene src
+      - name: Lint plugin
+        working-directory: plugin
+        run: selene src
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run docs:build

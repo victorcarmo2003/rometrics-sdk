@@ -1,0 +1,23 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attach ready-to-use builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            sdk/roblox/dist/RoMetrics.rbxm \
+            plugin/dist/RoMetricsPlugin.rbxm \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Veja o changelog: https://victorcarmo2003.github.io/rometrics-sdk/changelog"

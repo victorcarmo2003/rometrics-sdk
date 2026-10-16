@@ -1,0 +1,11 @@
+{
+  "name": "RoMetricsTest",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "RoMetrics": { "$path": "src" },
+      "Tests": { "$path": "tests" }
+    },
+    "HttpService": { "$properties": { "HttpEnabled": true } }
+  }
+}

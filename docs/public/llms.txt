@@ -1,0 +1,17 @@
+# RoMetrics SDK
+
+> Server-side Luau SDK and Roblox Studio plugin for RoMetrics, real-time analytics for Roblox games (players, CCU, sales, custom events, funnels, attribution). The event API mirrors Roblox AnalyticsService.
+
+The single most useful file for an AI assistant is the full reference below; it contains every public function, option, rule and common mistake.
+
+## Docs
+
+- [Full reference for AI assistants](https://victorcarmo2003.github.io/rometrics-sdk/rometrics-sdk.ai.md): complete API, validation rules, automatic tracking, tags, attribution, pitfalls and recipes (English)
+- [Getting started (pt-BR)](https://victorcarmo2003.github.io/rometrics-sdk/guia/comecando): install, Secrets Store key, first events
+- [Module API reference (pt-BR)](https://victorcarmo2003.github.io/rometrics-sdk/referencia/sdk)
+- [Tag attributes RM_* (pt-BR)](https://victorcarmo2003.github.io/rometrics-sdk/referencia/atributos)
+- [Data sent (pt-BR)](https://victorcarmo2003.github.io/rometrics-sdk/referencia/dados-enviados)
+
+## Source
+
+- [GitHub repository](https://github.com/victorcarmo2003/rometrics-sdk): `sdk/roblox/src` (SDK), `plugin/src` (Studio plugin), MIT license

@@ -1,0 +1,3 @@
+std = "roblox+testez"
+# Lune runner (not Roblox code).
+exclude = ["tools/*"]

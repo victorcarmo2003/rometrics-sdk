@@ -1,0 +1,59 @@
+/* RoMetrics dashboard palette: near-black surfaces, white text, single blue accent. */
+:root {
+  --vp-c-brand-1: #5b97ff;
+  --vp-c-brand-2: #2f7bff;
+  --vp-c-brand-3: #2f7bff;
+  --vp-c-brand-soft: rgba(47, 123, 255, 0.16);
+  --vp-font-family-base: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+.dark {
+  --vp-c-bg: #08090b;
+  --vp-c-bg-alt: #0b0d10;
+  --vp-c-bg-soft: #0f1114;
+  --vp-c-bg-elv: #0f1114;
+  --vp-c-divider: #1f242b;
+  --vp-c-border: #1f242b;
+  --vp-c-gutter: #08090b;
+  --vp-c-text-1: #f5f7fa;
+  --vp-c-text-2: #a7afba;
+  --vp-c-text-3: #8a93a0;
+  --vp-code-block-bg: #0f1114;
+  --vp-code-bg: #161a1f;
+  --vp-c-default-soft: #161a1f;
+  --vp-button-brand-bg: #2f7bff;
+  --vp-button-brand-hover-bg: #4a8cff;
+  --vp-button-brand-active-bg: #2566d6;
+  --vp-home-hero-name-color: #f5f7fa;
+}
+
+.VPHero .name .clip {
+  background: none;
+  -webkit-text-fill-color: #f5f7fa;
+}
+.VPHero .text {
+  color: var(--vp-c-text-2);
+  font-weight: 500;
+}
+
+.VPFeature {
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+}
+
+/* Method signature headings in the API reference. */
+.vp-doc h3 code {
+  font-size: 0.92em;
+  background: transparent;
+  padding: 0;
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc table {
+  display: table;
+  width: 100%;
+}
+.vp-doc td code {
+  white-space: nowrap;
+}

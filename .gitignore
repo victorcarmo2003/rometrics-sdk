@@ -1,0 +1,13 @@
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+*.log
+.DS_Store
+sourcemap.json
+Packages/
+*.rbxl
+*.rbxlx
+# Ready-to-use builds are committed.
+*.rbxm
+!sdk/roblox/dist/*.rbxm
+!plugin/dist/*.rbxm
