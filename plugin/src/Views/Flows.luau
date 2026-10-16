@@ -376,9 +376,9 @@ function View.render(app: any, container: Frame)
 				})
 				UI.new("TextLabel", {
 					BackgroundTransparency = 1,
-					Text = "▼",
-					TextSize = 12,
-					FontFace = Theme.FONT,
+					Text = "˅",
+					TextSize = 14,
+					FontFace = Theme.FONT_BOLD,
 					TextColor3 = funnelColor,
 					Position = UDim2.new(0, 14, 1, -14),
 					Size = UDim2.fromOffset(12, 14),

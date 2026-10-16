@@ -152,6 +152,29 @@ function Studio.detectSdkPath(): string?
 	return nil
 end
 
+-- The SDK ModuleScript itself (see detectSdkPath), or nil when not installed.
+function Studio.sdkModule(): ModuleScript?
+	local path = Studio.detectSdkPath()
+	if not path then
+		return nil
+	end
+	local node: Instance? = game
+	for _, segment in string.split(path, ".") do
+		node = if node then node:FindFirstChild(segment) else nil
+	end
+	return if node and node:IsA("ModuleScript") then node else nil
+end
+
+-- First server Script that calls RoMetrics.init (the setup script), if any.
+function Studio.setupScript(): Script?
+	for _, descendant in ServerScriptService:GetDescendants() do
+		if descendant:IsA("Script") and string.find(getSource(descendant), "RoMetrics.init", 1, true) then
+			return descendant
+		end
+	end
+	return nil
+end
+
 -- Selection / navigation --------------------------------------------------------------------------
 
 function Studio.selection(): { Instance }

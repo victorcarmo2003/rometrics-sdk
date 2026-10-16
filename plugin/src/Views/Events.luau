@@ -86,7 +86,8 @@ function View.render(app: any, container: Frame)
 			end
 			local collapsed = state.collapsed[kind] == true
 			order += 1
-			local header = UI.listRow(`{if collapsed then "▸" else "▾"}  {KIND_LABELS[kind]}`, {
+			local header = UI.listRow(KIND_LABELS[kind], {
+				prefix = { UI.chevron(not collapsed) },
 				font = Theme.FONT_BOLD,
 				color = p.subText,
 				height = 24,
@@ -163,8 +164,7 @@ function View.render(app: any, container: Frame)
 					renderMain()
 				end,
 			}),
-			UI.button("↻", {
-				width = 28,
+			UI.button("Recarregar", {
 				onClick = function()
 					app:reloadRegistry()
 				end,
@@ -382,7 +382,7 @@ function View.render(app: any, container: Frame)
 			).Parent =
 				body
 			for _, note in app.registryNotes do
-				UI.label("⚠ " .. note, { wrap = true, color = p.warning, size = 12 }).Parent = body
+				UI.label("Aviso: " .. note, { wrap = true, color = p.warning, size = 12 }).Parent = body
 			end
 			panel.Parent = scroller
 			return

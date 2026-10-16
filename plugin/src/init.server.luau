@@ -10,6 +10,7 @@ end
 local App = require(script.App)
 
 local views = {
+	require(script.Views.Home),
 	require(script.Views.Events),
 	require(script.Views.Track),
 	require(script.Views.Snippets),
@@ -19,10 +20,10 @@ local views = {
 } :: { any }
 
 local toolbar = plugin:CreateToolbar("RoMetrics")
-local button = toolbar:CreateButton("RoMetrics", "Eventos, tags, snippets e funis do RoMetrics", "")
+local button = toolbar:CreateButton("RoMetrics", "Instalar o SDK, criar eventos e conferir o envio", "")
 button.ClickableWhenViewportHidden = true
 
-local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 560, 640, 420, 360)
+local widgetInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, false, 760, 640, 460, 380)
 local okAsync, asyncWidget = pcall(function()
 	return (plugin :: any):CreateDockWidgetPluginGuiAsync("RoMetricsWidget", widgetInfo)
 end)

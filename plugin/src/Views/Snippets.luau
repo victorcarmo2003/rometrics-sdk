@@ -19,7 +19,7 @@ end
 
 local View = {
 	id = "snippets",
-	title = "Snippets",
+	title = "Código",
 	watches = { selection = true },
 }
 
@@ -66,8 +66,18 @@ function View.render(app: any, container: Frame)
 	local scroller = UI.scroll({ Parent = main }, 10, 12)
 	UI.label(snippet.title, { font = Theme.FONT_BOLD, size = 18 }).Parent = scroller
 	UI.label(snippet.description, { wrap = true, color = p.subText }).Parent = scroller
+	if not Studio.sdkModule() then
+		UI.notice("O SDK ainda não está neste place: este código vai falhar no require. Instale na aba <b>Início</b>.", "warning").Parent =
+			scroller
+		UI.button("Ir para Início", {
+			onClick = function()
+				app:setTab("home")
+			end,
+		}).Parent =
+			scroller
+	end
 
-	local controlsPanel, controls = UI.section("Controls")
+	local controlsPanel, controls = UI.section("Opções")
 	if snippet.kind then
 		local options = {}
 		for _, candidate in Registry.byKind(app.registry, snippet.kind) do
@@ -104,40 +114,55 @@ function View.render(app: any, container: Frame)
 	code.TextWrapped = false
 	code.Parent = scroller
 
-	local target = Studio.selectedScript()
-	local actions: { Instance } = {
-		UI.button(if target then `Inserir em {target.Name}` else "Selecione um script para inserir", {
-			variant = if target then "primary" else "secondary",
-			disabled = target == nil,
+	-- Where the code goes: the selected script, else the setup script, else a new Script.
+	local selected = Studio.selectedScript()
+	local setup = if snippet.id == "setup" then nil else Studio.setupScript()
+	local target = selected or setup
+	local function insert(into: LuaSourceContainer?)
+		local result, err = Studio.insertSnippet(output, into, snippet.scriptName)
+		if err or not result then
+			app:toast(`Falha: {err}`, "error")
+			return
+		end
+		Studio.select({ result })
+		app:toast(
+			if into then `Inserido em {result:GetFullName()} (Ctrl+Z desfaz)` else `Criado {result:GetFullName()}`,
+			"success"
+		)
+		Studio.openScript(app.plugin, result)
+	end
+	local actions: { Instance } = {}
+	if target then
+		table.insert(
+			actions,
+			UI.button(`Inserir em {target.Name}`, {
+				variant = "primary",
+				onClick = function()
+					insert(target)
+				end,
+			})
+		)
+	end
+	table.insert(
+		actions,
+		UI.button(`Criar Script {snippet.scriptName}`, {
+			variant = if target then "secondary" else "primary",
 			onClick = function()
-				if not target then
-					return
-				end
-				local result, err = Studio.insertSnippet(output, target, snippet.scriptName)
-				if err or not result then
-					app:toast(`Falha: {err}`, "error")
-					return
-				end
-				app:toast(`Inserido em {result:GetFullName()} (Ctrl+Z desfaz)`, "success")
-				Studio.openScript(app.plugin, result)
+				insert(nil)
 			end,
-		}),
-		UI.button(`Novo Script ({snippet.scriptName})`, {
-			onClick = function()
-				local result, err = Studio.insertSnippet(output, nil, snippet.scriptName)
-				if err or not result then
-					app:toast(`Falha: {err}`, "error")
-					return
-				end
-				Studio.select({ result })
-				app:toast(`Criado {result:GetFullName()}`, "success")
-				Studio.openScript(app.plugin, result)
-			end,
-		}),
-	}
+		})
+	)
+	UI.notice(
+		if selected
+			then `Vai inserir no script selecionado: <b>{selected:GetFullName()}</b>.`
+			elseif setup then `Nenhum script selecionado: vai inserir no script de setup <b>{setup.Name}</b>. Selecione outro no Explorer para trocar.`
+			else "Selecione um script no Explorer para inserir nele, ou crie um novo em ServerScriptService.",
+		"info"
+	).Parent =
+		scroller
 	UI.row(8, actions).Parent = scroller
 	UI.label(
-		"Inserir: as linhas de require/GetService que faltam vão para o topo; o corpo vai para o fim do script. "
+		"As linhas de require/GetService que faltam vão para o topo e o código vai para o fim do script. "
 			.. "Scripts novos vão para ServerScriptService (o SDK só roda no servidor).",
 		{ wrap = true, color = p.dimText, size = Theme.SMALL_SIZE }
 	).Parent =

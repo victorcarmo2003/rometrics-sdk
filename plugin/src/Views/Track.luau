@@ -291,7 +291,7 @@ function View.render(app: any, container: Frame)
 		end
 
 		-- Controls
-		local controlsPanel, controls = UI.section("Controls")
+		local controlsPanel, controls = UI.section("Opções")
 		local eventOptions = {}
 		for _, event in Registry.byKind(app.registry, "custom") do
 			table.insert(eventOptions, {

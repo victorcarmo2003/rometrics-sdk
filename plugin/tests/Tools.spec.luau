@@ -6,6 +6,7 @@ local ScriptScan = require(src.ScriptScan) :: any
 local Snippets = require(src.Snippets) :: any
 local Flow = require(src.Flow) :: any
 local Lint = require(src.Lint) :: any
+local Installer = require(src.Installer) :: any
 
 return function()
 	local function sampleRegistry()
@@ -258,6 +259,50 @@ return function()
 			expect(result.unused).to.equal(3) -- BossKilled, Tutorial, Coins (ShopOpened is linked by a step)
 			expect(issues[1].severity).to.equal("error")
 			expect(issues[#issues].severity).to.equal("info")
+		end)
+	end)
+
+	describe("Installer.plan", function()
+		it("builds the Rojo-style tree from repo paths", function()
+			local plan = Installer.plan({
+				"README.md",
+				"sdk/roblox/src/init.luau",
+				"sdk/roblox/src/Config.luau",
+				"sdk/roblox/src/Util/Clock.luau",
+				"sdk/roblox/src/Client/RoMetricsClient.client.luau",
+				"sdk/roblox/src/Client/Bridge.luau",
+				"sdk/roblox/tests/run.luau",
+				"plugin/src/init.server.luau",
+			})
+			expect(plan).to.be.ok()
+			expect(plan.name).to.equal("RoMetrics")
+			expect(plan.className).to.equal("ModuleScript")
+			expect(plan.file).to.equal("sdk/roblox/src/init.luau")
+			local byName = {}
+			for _, child in plan.children do
+				byName[child.name] = child
+			end
+			expect(byName.Config.className).to.equal("ModuleScript")
+			expect(byName.Util.className).to.equal("Folder")
+			expect(byName.Util.children[1].name).to.equal("Clock")
+			local client = {}
+			for _, child in byName.Client.children do
+				client[child.name] = child.className
+			end
+			expect(client.RoMetricsClient).to.equal("LocalScript")
+			expect(client.Bridge).to.equal("ModuleScript")
+			expect(#Installer.files(plan)).to.equal(5)
+		end)
+
+		it("turns a folder with init.luau into a ModuleScript", function()
+			local plan = Installer.plan({ "s/init.luau", "s/Net/init.luau", "s/Net/Http.luau" }, "s")
+			expect(plan.children[1].name).to.equal("Net")
+			expect(plan.children[1].className).to.equal("ModuleScript")
+			expect(plan.children[1].children[1].name).to.equal("Http")
+		end)
+
+		it("rejects trees without a root init.luau", function()
+			expect(Installer.plan({ "sdk/roblox/src/Config.luau" })).never.to.be.ok()
 		end)
 	end)
 end

@@ -18,7 +18,7 @@ local DEFAULTS: Values = {
 	sdkPath = "ReplicatedStorage.Packages.RoMetrics",
 	dashboardUrl = "https://app.rometrics.app",
 	highlight = false,
-	lastTab = "events",
+	lastTab = "home",
 }
 Settings.DEFAULTS = DEFAULTS
 

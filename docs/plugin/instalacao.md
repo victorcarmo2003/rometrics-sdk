@@ -16,4 +16,4 @@ rojo build plugin/default.project.json -o RoMetricsPlugin.rbxm
 
 ## Permissão de HTTP
 
-O botão **Testar conexão** (aba Config) faz um `GET {endpoint}/health`. Na primeira vez o Studio pede permissão para o domínio (*Plugin Management → permissões*). O plugin **nunca** lê nem guarda a sua chave: Secrets só existem no servidor do jogo.
+O botão **Instalar do GitHub** (aba Início) baixa o SDK de `api.github.com` e `raw.githubusercontent.com`: aceite a permissão de HTTP que o Studio pede na primeira vez. O botão **Testar conexão** (abas Início e Config) faz um `GET {endpoint}/health`. Na primeira vez o Studio pede permissão para o domínio (*Plugin Management → permissões*). O plugin **nunca** lê nem guarda a sua chave: Secrets só existem no servidor do jogo.

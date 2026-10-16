@@ -605,17 +605,10 @@ function UI.dropdown(opts: DropdownOptions): any
 		Size = UDim2.new(1, -16, 1, 0),
 		Parent = button,
 	})
-	UI.new("TextLabel", {
-		BackgroundTransparency = 1,
-		Text = "▾",
-		FontFace = Theme.FONT,
-		TextSize = Theme.TEXT_SIZE,
-		TextColor3 = p.subText,
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.new(0, 12, 1, 0),
-		Parent = button,
-	})
+	local arrow = UI.chevron(true, p.subText)
+	arrow.AnchorPoint = Vector2.new(1, 0.5)
+	arrow.Position = UDim2.fromScale(1, 0.5)
+	arrow.Parent = button
 	button.Activated:Connect(function()
 		local root = overlayRoot
 		if not root then
@@ -841,6 +834,166 @@ function UI.prompt(title: string, message: string?, initial: string, onSubmit: (
 			box:CaptureFocus()
 		end
 	end)
+end
+
+-- Expand/collapse arrow. BuilderSans has no triangle glyphs (they render as boxes) and Rotation
+-- is ignored under ClipsDescendants, so open/closed are two glyphs the font does have.
+function UI.chevron(open: boolean, color: Color3?): any
+	return UI.new("TextLabel", {
+		BackgroundTransparency = 1,
+		Text = if open then "˅" else "›",
+		FontFace = Theme.FONT_BOLD,
+		TextSize = 16,
+		TextColor3 = color or UI.palette.subText,
+		Size = UDim2.fromOffset(12, 16),
+	})
+end
+
+-- Brand ---------------------------------------------------------------------------------------------
+
+-- RoMetrics logo (docs/public/logo.svg): blue rounded square with three rising bars.
+-- Axis-aligned rounded rects only, so native Frames stay crisp at any size (no image upload).
+function UI.logo(size: number?): any
+	local s = size or 20
+	local unit = s / 24
+	local bars = {}
+	for _, bar in { { 6, 12.5, 5.5, 0.45 }, { 10.7, 9, 9, 0.2 }, { 15.4, 5.5, 12.5, 0 } } do
+		table.insert(
+			bars,
+			UI.new("Frame", {
+				BackgroundColor3 = Color3.new(1, 1, 1),
+				BackgroundTransparency = bar[4],
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(math.floor(bar[1] * unit + 0.5), math.floor(bar[2] * unit + 0.5)),
+				Size = UDim2.fromOffset(math.max(2, math.floor(2.6 * unit + 0.5)), math.floor(bar[3] * unit + 0.5)),
+			}, { UI.corner(math.max(1, math.floor(1.1 * unit))) })
+		)
+	end
+	local frame = UI.new("Frame", {
+		Name = "Logo",
+		BackgroundColor3 = Theme.ACCENT,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(s, s),
+	}, bars)
+	UI.corner(math.floor(6 * unit + 0.5)).Parent = frame
+	return frame
+end
+
+-- Status pill: colored dot + text, e.g. "SDK instalado".
+function UI.pill(text: string, color: Color3, onClick: (() -> ())?): any
+	local p = UI.palette
+	local pill = UI.new(if onClick then "TextButton" else "Frame", {
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.85,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(0, 22),
+		AutomaticSize = Enum.AutomaticSize.X,
+	}, {
+		UI.new("Frame", { BackgroundColor3 = color, BorderSizePixel = 0, Size = UDim2.fromOffset(6, 6) }, { UI.corner(3) }),
+		UI.label(text, { size = Theme.SMALL_SIZE, font = Theme.FONT_MEDIUM, color = p.text, autoX = true, height = 22 }),
+	})
+	if onClick then
+		(pill :: any).AutoButtonColor = false;
+		(pill :: any).Text = "";
+		(pill :: any).Activated:Connect(onClick)
+	end
+	UI.hlist(6).Parent = pill
+	UI.corner(11).Parent = pill
+	UI.padding(0, 10, 0, 8).Parent = pill
+	return pill
+end
+
+export type StepOptions = {
+	number: number,
+	title: string,
+	description: string,
+	state: "done" | "todo" | "optional",
+	status: string?,
+	actions: { any }?,
+	extra: { any }?,
+}
+
+-- Numbered checklist card for the Home tab.
+function UI.step(o: StepOptions): any
+	local p = UI.palette
+	local done = o.state == "done"
+	local badgeColor = if done then p.success elseif o.state == "todo" then p.accent else p.dimText
+	local badge = UI.new("Frame", {
+		BackgroundColor3 = badgeColor,
+		BackgroundTransparency = if done then 0 else 0.8,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(24, 24),
+	}, {
+		UI.new("TextLabel", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+			Text = if done then "✓" else tostring(o.number),
+			FontFace = Theme.FONT_BOLD,
+			TextSize = 13,
+			TextColor3 = if done then Color3.new(1, 1, 1) else badgeColor,
+		}),
+	})
+	UI.corner(12).Parent = badge
+
+	local titleRow = UI.row(8, {
+		UI.label(o.title, { font = Theme.FONT_BOLD, size = 15, autoX = true, height = 24 }),
+	}, { Size = UDim2.new(1, 0, 0, 24) })
+	if o.status then
+		local statusLabel =
+			UI.label(o.status, { size = Theme.SMALL_SIZE, color = if done then p.success else p.subText, autoX = true, height = 24 })
+		statusLabel.LayoutOrder = 10
+		statusLabel.Parent = titleRow
+	end
+
+	local body = UI.column(8, {
+		titleRow,
+		UI.label(o.description, { wrap = true, color = p.subText, size = 13 }),
+	})
+	body.Size = UDim2.fromScale(0, 0)
+	UI.flex().Parent = body
+	for _, child in (o.extra or {}) :: { any } do
+		child.Parent = body
+	end
+	if o.actions and #o.actions > 0 then
+		local actions = UI.row(8, o.actions, { Size = UDim2.new(1, 0, 0, 28) })
+		actions.Parent = body
+	end
+
+	local card = UI.new("Frame", {
+		BackgroundColor3 = p.panel,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, { badge, body })
+	local layout = UI.hlist(12, Enum.VerticalAlignment.Top)
+	layout.Parent = card
+	UI.padding(12, 14, 12, 12).Parent = card
+	UI.corner(8).Parent = card
+	UI.stroke(if o.state == "todo" then p.accent:Lerp(p.border, 0.55) else p.border).Parent = card
+	return card
+end
+
+-- Tip/notice box (info, warning, success).
+function UI.notice(text: string, kind: ("info" | "warning" | "success" | "danger")?): any
+	local p = UI.palette
+	local color = if kind == "warning"
+		then p.warning
+		elseif kind == "success" then p.success
+		elseif kind == "danger" then p.danger
+		else p.accent
+	local box = UI.new("Frame", {
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.88,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, {
+		UI.label(text, { wrap = true, size = 13, color = p.text, rich = true }),
+	})
+	UI.corner(6).Parent = box
+	UI.padding(8, 10, 8, 10).Parent = box
+	UI.stroke(color:Lerp(p.border, 0.5)).Parent = box
+	return box
 end
 
 return UI

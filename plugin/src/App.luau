@@ -1,6 +1,7 @@
 --!strict
--- Shell: header with tabs, view area, status bar, modal overlay. Owns shared state (registry,
--- settings, per-view UI state) and re-renders the active view when the place changes.
+-- Shell: header (logo + SDK status), grouped sidebar nav, view area, status bar and modal overlay.
+-- Owns shared state (registry, settings, per-view UI state) and re-renders the active view when
+-- the place changes.
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Selection = game:GetService("Selection")
@@ -118,77 +119,170 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 		updateStatus()
 	end
 
+	-- Sidebar groups, in workflow order (labels already uppercase: string.upper is ASCII-only).
+	-- Views missing here land in the last group.
+	local NAV: { { label: string, ids: { string } } } = {
+		{ label = "COMEÇAR", ids = { "home" } },
+		{ label = "EVENTOS", ids = { "events", "track", "snippets", "flows" } },
+		{ label = "CONFERIR", ids = { "validate", "config" } },
+	}
+	local RAIL_WIDTH = 132
+	local HEADER_HEIGHT = 44
+	local STATUS_HEIGHT = 24
+
+	local function navItem(view: View): TextButton
+		local p = UI.palette
+		local active = view.id == self.tab
+		local item = UI.new("TextButton", {
+			Name = view.id,
+			AutoButtonColor = false,
+			Text = "",
+			BackgroundColor3 = if active then p.accentSoft else p.hover,
+			BackgroundTransparency = if active then 0 else 1,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 0, 30),
+		}, {
+			UI.new("Frame", {
+				Name = "Bar",
+				BackgroundColor3 = p.accent,
+				BackgroundTransparency = if active then 0 else 1,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(0, 7),
+				Size = UDim2.fromOffset(3, 16),
+			}, { UI.corner(2) }),
+			UI.new("TextLabel", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(1, -16, 1, 0),
+				Text = view.title,
+				FontFace = if active then Theme.FONT_BOLD else Theme.FONT_MEDIUM,
+				TextSize = 14,
+				TextColor3 = if active then p.text else p.subText,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+			}),
+		})
+		UI.corner(6).Parent = item
+		if not active then
+			item.MouseEnter:Connect(function()
+				item.BackgroundTransparency = 0
+			end)
+			item.MouseLeave:Connect(function()
+				item.BackgroundTransparency = 1
+			end)
+		end
+		item.Activated:Connect(function()
+			self:setTab(view.id)
+		end)
+		return item
+	end
+
+	local function buildRail(): (Frame, Frame)
+		local p = UI.palette
+		local byId: { [string]: View } = {}
+		local placed: { [string]: boolean } = {}
+		for _, view in views do
+			byId[view.id] = view
+		end
+		local rail = UI.scroll({
+			Name = "Nav",
+			BackgroundColor3 = p.sidebar,
+			BackgroundTransparency = 0,
+			Position = UDim2.fromOffset(0, HEADER_HEIGHT),
+			Size = UDim2.new(0, RAIL_WIDTH, 1, -HEADER_HEIGHT - STATUS_HEIGHT),
+			ScrollBarThickness = 0,
+		}, 2, 8)
+		for index, group in NAV do
+			local items: { View } = {}
+			for _, id in group.ids do
+				if byId[id] then
+					table.insert(items, byId[id])
+					placed[id] = true
+				end
+			end
+			if index == #NAV then
+				for _, view in views do
+					if not placed[view.id] then
+						table.insert(items, view)
+					end
+				end
+			end
+			if #items > 0 then
+				local heading = UI.label(group.label, {
+					font = Theme.FONT_BOLD,
+					size = 11,
+					color = p.dimText,
+					height = if index == 1 then 20 else 30,
+				})
+				heading.TextYAlignment = Enum.TextYAlignment.Bottom
+				UI.padding(0, 0, 4, 12).Parent = heading
+				heading.Parent = rail
+				for _, view in items do
+					navItem(view).Parent = rail
+				end
+			end
+		end
+		local border = UI.new("Frame", {
+			Name = "NavBorder",
+			BackgroundColor3 = p.border,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromOffset(RAIL_WIDTH, HEADER_HEIGHT),
+			Size = UDim2.new(0, 1, 1, -HEADER_HEIGHT - STATUS_HEIGHT),
+		})
+		return rail, border
+	end
+
+	local function buildHeader(): Frame
+		local p = UI.palette
+		local sdk = Studio.sdkModule()
+		local version = if sdk then sdk:GetAttribute("RM_Version") else nil
+		local brand = UI.row(10, {
+			UI.logo(22),
+			UI.column(0, {
+				UI.label("RoMetrics", { font = Theme.FONT_BOLD, size = 15, height = 18 }),
+				UI.label("Analytics para o seu jogo", { size = 11, color = p.dimText, height = 14 }),
+			}, { Size = UDim2.fromOffset(170, 0) }),
+		}, { Size = UDim2.new(1, -180, 1, 0) })
+		local pill = if sdk
+			then UI.pill(if type(version) == "string" then `SDK {version}` else "SDK instalado", p.success, function()
+				self:setTab("home")
+			end)
+			else UI.pill("SDK não instalado", p.warning, function()
+				self:setTab("home")
+			end)
+		pill.AnchorPoint = Vector2.new(1, 0.5)
+		pill.Position = UDim2.fromScale(1, 0.5)
+		local header = UI.new("Frame", {
+			Name = "Header",
+			BackgroundColor3 = p.panel,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
+		}, { brand, pill })
+		UI.padding(0, 12, 0, 12).Parent = header
+		UI.new("Frame", {
+			BackgroundColor3 = p.border,
+			BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new(0, -12, 1, 0),
+			Size = UDim2.new(1, 24, 0, 1),
+			Parent = header,
+		})
+		return header
+	end
+
 	local function buildShell()
 		if root then
 			root:Destroy()
 		end
 		UI.setPalette(Theme.current())
 		local p = UI.palette
-		local tabs = {}
-		for _, view in views do
-			local active = view.id == self.tab
-			local tab = UI.new("TextButton", {
-				AutoButtonColor = false,
-				Text = view.title,
-				FontFace = if active then Theme.FONT_BOLD else Theme.FONT_MEDIUM,
-				TextSize = Theme.TEXT_SIZE,
-				TextColor3 = if active then p.text else p.subText,
-				BackgroundTransparency = 1,
-				Size = UDim2.fromScale(0, 1),
-				AutomaticSize = Enum.AutomaticSize.X,
-			}, {
-				UI.padding(0, 10, 0, 10),
-				UI.new("Frame", {
-					BackgroundColor3 = p.accent,
-					BorderSizePixel = 0,
-					BackgroundTransparency = if active then 0 else 1,
-					AnchorPoint = Vector2.new(0, 1),
-					Position = UDim2.new(0, -10, 1, 0),
-					Size = UDim2.new(1, 20, 0, 2),
-				}),
-			})
-			tab.Activated:Connect(function()
-				self:setTab(view.id)
-			end)
-			table.insert(tabs, tab)
-		end
-		local brand = UI.row(6, {
-			UI.new("Frame", { BackgroundColor3 = p.accent, Size = UDim2.fromOffset(10, 10) }, { UI.corner(3) }),
-			UI.label("RoMetrics", { font = Theme.FONT_BOLD, size = 15, autoX = true }),
-		}, { Size = UDim2.fromScale(0, 1), AutomaticSize = Enum.AutomaticSize.X })
-		UI.padding(0, 14, 0, 10).Parent = brand
-		local tabStrip = UI.new("ScrollingFrame", {
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Size = UDim2.fromScale(0, 1),
-			CanvasSize = UDim2.new(),
-			AutomaticCanvasSize = Enum.AutomaticSize.X,
-			ScrollingDirection = Enum.ScrollingDirection.X,
-			ScrollBarThickness = 0,
-		}, tabs)
-		UI.hlist(0).Parent = tabStrip
-		UI.flex().Parent = tabStrip
-		local header = UI.new("Frame", {
-			Name = "Header",
-			BackgroundColor3 = p.panel,
-			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, 36),
-		}, { brand, tabStrip })
-		UI.hlist(0, Enum.VerticalAlignment.Center).Parent = header
-		UI.new("Frame", {
-			BackgroundColor3 = p.border,
-			BorderSizePixel = 0,
-			AnchorPoint = Vector2.new(0, 1),
-			Position = UDim2.fromScale(0, 1),
-			Size = UDim2.new(1, 0, 0, 1),
-			Parent = header,
-		})
 
 		local body = UI.new("Frame", {
 			Name = "Content",
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(0, 36),
-			Size = UDim2.new(1, 0, 1, -36 - 24),
+			Position = UDim2.fromOffset(RAIL_WIDTH, HEADER_HEIGHT),
+			Size = UDim2.new(1, -RAIL_WIDTH, 1, -HEADER_HEIGHT - STATUS_HEIGHT),
 			ClipsDescendants = true,
 		})
 		content = body
@@ -206,7 +300,7 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 			BorderSizePixel = 0,
 			AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.fromScale(0, 1),
-			Size = UDim2.new(1, 0, 0, 24),
+			Size = UDim2.new(1, 0, 0, STATUS_HEIGHT),
 		}, { status, toast })
 		UI.padding(0, 10, 0, 10).Parent = statusBar
 
@@ -218,12 +312,13 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 		})
 		UI.setOverlay(overlay)
 
+		local rail, railBorder = buildRail()
 		local newRoot = UI.new("Frame", {
 			Name = "RoMetrics",
 			BackgroundColor3 = p.background,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
-		}, { header, body, statusBar, overlay })
+		}, { buildHeader(), rail, railBorder, body, statusBar, overlay })
 		newRoot.Parent = widget
 		root = newRoot
 		renderView()
@@ -333,7 +428,12 @@ function App.new(plugin: Plugin, widget: DockWidgetPluginGui, views: { View }): 
 
 	function self.split(_: App, container: Frame, leftWidth: number?): (Frame, Frame)
 		local p = UI.palette
+		-- Keep the main pane usable on narrow docks: the list never takes more than ~40%.
+		local available = container.AbsoluteSize.X
 		local width = leftWidth or 220
+		if available > 0 then
+			width = math.clamp(math.floor(available * 0.4), math.min(150, width), width)
+		end
 		local left = UI.new("Frame", {
 			Name = "Sidebar",
 			BackgroundColor3 = p.sidebar,

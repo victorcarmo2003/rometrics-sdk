@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+Plugin do Studio redesenhado. O SDK não mudou (continua igual ao 0.1.0).
+
+- Nova aba **Início** com checklist: instala o SDK do GitHub em 1 clique (última release), testa o endpoint, lembra do Secret e cria o script de setup.
+- Navegação em barra lateral agrupada (Começar, Eventos, Conferir), logo do RoMetrics e selo de status do SDK no topo.
+- Aba Snippets virou **Código**: sem script selecionado, o código vai para o script de setup ou para um Script novo; avisa quando o SDK não está no place.
+- Setas e ícones que viravam quadradinhos na fonte do Studio foram trocados.
+
 ## 0.1.0
 
 Primeira versão pública. Também no Wally: `victorcarmo2003/rometrics@0.1.0`.
