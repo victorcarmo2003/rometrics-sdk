@@ -4,7 +4,7 @@
 
 ## 1. Mental model
 
-- One ModuleScript named `RoMetrics` (usually in `ReplicatedStorage`). **Server-only**: require and call it from Scripts in `ServerScriptService`, never from LocalScripts.
+- One ModuleScript named `RoMetrics` (usually in `ReplicatedStorage`; with Wally: `RoMetrics = "victorcarmo2003/rometrics@0.1.0"`, required as `ReplicatedStorage.Packages.RoMetrics`). **Server-only**: require and call it from Scripts in `ServerScriptService`, never from LocalScripts.
 - Call `RoMetrics.init({...})` once at server start. After that, a lot is tracked automatically (servers/CCU, player join/leave, country, Premium, join source, Game Pass purchases, player platform, tagged instances).
 - The event API mirrors Roblox `AnalyticsService` exactly (same method names and argument order), called with `:`.
 - **No call ever throws** into game code. Invalid input is dropped with a `warn` in Output. Do not wrap SDK calls in `pcall`; it is unnecessary.

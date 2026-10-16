@@ -1,7 +1,12 @@
 [package]
-name = "rometrics/rometrics"
+name = "victorcarmo2003/rometrics"
 version = "0.1.0"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 license = "MIT"
 description = "Real-time analytics SDK for Roblox experiences"
+authors = ["RoMetrics"]
+homepage = "https://victorcarmo2003.github.io/rometrics-sdk/"
+repository = "https://github.com/victorcarmo2003/rometrics-sdk"
+# Only the module ships: tests, examples, tooling and prebuilt .rbxm stay in the repo.
+exclude = ["tests", "examples", "dist", "test.project.json", "testez.yml", "selene.toml", "rokit.toml", "**/*.rbxm"]
